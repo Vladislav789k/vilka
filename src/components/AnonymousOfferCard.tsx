@@ -1,12 +1,17 @@
 "use client";
 
+import { QuantityControls } from "./QuantityControls";
+
 type AnonymousOfferCardProps = {
   name: string;
   price: number;
   oldPrice?: number;
-  tag?: string;      // текст плашки, если нет скидки
-  subtitle?: string; // вторая строка под названием
-  imageUrl?: string | null; // ✅ НОВЫЙ проп для картинки
+  tag?: string;
+  subtitle?: string;
+  imageUrl?: string | null;
+  quantity?: number;
+  onAdd?: () => void;
+  onRemove?: () => void;
 };
 
 const AnonymousOfferCard = ({
@@ -15,14 +20,18 @@ const AnonymousOfferCard = ({
   oldPrice,
   tag,
   subtitle,
-  imageUrl, // ✅ добавили в деструктуризацию
+  imageUrl,
+  quantity = 0,
+  onAdd,
+  onRemove,
 }: AnonymousOfferCardProps) => {
   const discount =
     oldPrice && oldPrice > price
-      ? `-${Math.round(((oldPrice - price) / oldPrice) * 100)}%` // ✅ шаблонная строка
+      ? `-${Math.round(((oldPrice - price) / oldPrice) * 100)}%`
       : tag;
 
   const hasImage = !!imageUrl;
+  const hasHandlers = !!(onAdd && onRemove);
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-[24px] border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
@@ -60,7 +69,7 @@ const AnonymousOfferCard = ({
           </div>
         )}
 
-        {/* ценовая капсула как у Самоката */}
+        {/* ценовая капсула */}
         <div className="mt-auto flex items-center justify-between rounded-2xl border border-emerald-100 bg-emerald-50 px-3.5 py-2">
           <div className="flex flex-col">
             <div className="flex items-baseline gap-1">
@@ -75,10 +84,15 @@ const AnonymousOfferCard = ({
             </div>
           </div>
 
-          {/* белый кружок с зелёным плюсом */}
-        <button className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-base font-semibold leading-none text-emerald-500 shadow-sm hover:bg-emerald-50">
-            +
-          </button>
+          {hasHandlers ? (
+            <QuantityControls
+              quantity={quantity}
+              onAdd={onAdd}
+              onRemove={onRemove}
+            />
+          ) : (
+            <div className="flex h-8 w-8 items-center justify-center" aria-hidden="true" />
+          )}
         </div>
       </div>
     </article>

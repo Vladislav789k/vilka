@@ -15,6 +15,8 @@ import AuthModal from "@/components/AuthModal";
 import AddressModal from "@/components/AddressModal";
 import AnonymousOfferCard from "@/components/AnonymousOfferCard";
 import BrandedOfferCard from "@/components/BrandedOfferCard";
+import { MenuOptionButton } from "@/components/MenuOptionButton";
+import { QuantityControls } from "@/components/QuantityControls";
 import { Heart } from "lucide-react";
 import { CartProvider, useCart } from "@/modules/cart/cartContext";
 import { buildCatalogIndexes } from "@/modules/catalog/indexes";
@@ -68,6 +70,22 @@ function CategoryEmoji({ code }: { code: string }) {
 
 function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: CatalogIndexes }) {
   const { quantities, entries, totals, add, remove } = useCart();
+
+  // #region agent log
+  useEffect(() => {
+    const logViewport = () => {
+      const width = window.innerWidth;
+      const sidebarEl = document.querySelector('aside[class*="hidden"]');
+      const computedWidth = sidebarEl ? window.getComputedStyle(sidebarEl).width : 'unknown';
+      const gridEl = document.querySelector('div[class*="grid-cols"]');
+      const gridTemplate = gridEl ? window.getComputedStyle(gridEl).gridTemplateColumns : 'unknown';
+      fetch('http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'CatalogPageClient.tsx:69',message:'Viewport and layout check',data:{viewportWidth:width,sidebarWidth:computedWidth,gridTemplate,breakpoint:width>=1280?'xl':width>=1024?'lg':width>=768?'md':'sm'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    };
+    logViewport();
+    window.addEventListener('resize', logViewport);
+    return () => window.removeEventListener('resize', logViewport);
+  }, []);
+  // #endregion
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isMiniCartOpen, setIsMiniCartOpen] = useState(false);
@@ -309,25 +327,12 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                                   {offer.price} ₽ × {quantity}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => remove(offer.id)}
-                                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-100"
-                                >
-                                  –
-                                </button>
-                                <span className="w-6 text-center text-sm font-semibold text-slate-900">
-                                  {quantity}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => add(offer.id)}
-                                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-semibold text-emerald-600 shadow-sm hover:bg-slate-100"
-                                >
-                                  +
-                                </button>
-                              </div>
+                              <QuantityControls
+                                quantity={quantity}
+                                onAdd={() => add(offer.id)}
+                                onRemove={() => remove(offer.id)}
+                                size="sm"
+                              />
                             </div>
                           ))
                         )}
@@ -395,10 +400,22 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
       </header>
 
       <section className="mx-auto w-full max-w-7xl px-4 pb-6 pt-4 md:pb-8 md:pt-6">
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[260px_minmax(0,1fr)_320px]">
-          <aside className="hidden w-full rounded-3xl bg-white shadow-vilka-soft md:block lg:w-auto lg:border lg:border-slate-100">
-            <div className="rounded-3xl bg-white p-3 shadow-vilka-soft">
-              <h2 className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+        <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[64px_minmax(0,1fr)_320px] lg:grid-cols-[200px_minmax(0,1fr)_320px] xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+          {/* #region agent log */}
+          <aside 
+            ref={(el) => {
+              if (el) {
+                const width = window.getComputedStyle(el).width;
+                const display = window.getComputedStyle(el).display;
+                const firstBtn = el.querySelector('button');
+                const btnTextVisible = firstBtn ? window.getComputedStyle(firstBtn.querySelector('span[class*="hidden"]') as Element).display !== 'none' : false;
+                fetch('http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'CatalogPageClient.tsx:399',message:'Sidebar render check',data:{sidebarWidth:width,display,textVisible:btnTextVisible,viewportWidth:window.innerWidth},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+              }
+            }}
+            className="hidden w-full rounded-3xl bg-white shadow-vilka-soft md:block md:w-auto md:border md:border-slate-100">
+          {/* #endregion */}
+            <div className="rounded-3xl bg-white p-2 md:p-3">
+              <h2 className="hidden px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 lg:block">
                 Категории
               </h2>
 
@@ -416,23 +433,58 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                     <button
                       type="button"
                       onClick={() => handleCategoryClick(cat.id)}
+                      title={cat.name}
+                      onMouseEnter={(e) => {
+                        // #region agent log
+                        const el = e.currentTarget;
+                        const tooltipEl = window.getComputedStyle(el, '::after');
+                        const tooltipOpacity = tooltipEl.opacity;
+                        const viewportWidth = window.innerWidth;
+                        fetch('http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'CatalogPageClient.tsx:416',message:'Tooltip hover check',data:{categoryName:cat.name,viewportWidth,tooltipOpacity,hasTooltipClass:el.classList.contains('tooltip-icon-only')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                        // #endregion
+                      }}
                       className={[
-                        "flex w-full items-center justify-between rounded-2xl px-2 py-2 text-left transition",
+                        "group flex w-full items-center justify-between rounded-2xl px-2 py-2 text-left transition",
+                        "md:justify-center lg:justify-between",
+                        "md:tooltip-icon-only",
                         isCatActive
                           ? "bg-white text-slate-900 font-semibold"
                           : "bg-white text-slate-800 hover:bg-surface-soft",
                       ].join(" ")}
                     >
-                      <span className="flex items-center gap-3">
-                        <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-surface-soft text-lg">
+                      <span 
+                        ref={(el) => {
+                          // #region agent log
+                          if (el) {
+                            const justifyContent = window.getComputedStyle(el).justifyContent;
+                            const viewportWidth = window.innerWidth;
+                            fetch('http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'CatalogPageClient.tsx:429',message:'Icon container alignment check',data:{categoryName:cat.name,justifyContent,viewportWidth,expectedCenter:viewportWidth>=768&&viewportWidth<1024},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                          }
+                          // #endregion
+                        }}
+                        className="flex items-center gap-2 lg:gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-surface-soft text-lg md:h-10 md:w-10">
                           <CategoryEmoji code={cat.id} />
                         </span>
-                        <span className="flex flex-col">
-                          <span className="text-sm leading-tight">
+                        <span 
+                          ref={(el) => {
+                            // #region agent log
+                            if (el) {
+                              const display = window.getComputedStyle(el).display;
+                              const width = window.getComputedStyle(el).width;
+                              const textEl = el.querySelector('span');
+                              const textWidth = textEl ? window.getComputedStyle(textEl).width : 'unknown';
+                              const textOverflow = textEl ? window.getComputedStyle(textEl).textOverflow : 'unknown';
+                              fetch('http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'CatalogPageClient.tsx:433',message:'Text visibility and truncation check',data:{categoryName:cat.name,textContainerDisplay:display,textContainerWidth:width,textWidth,textOverflow,viewportWidth:window.innerWidth},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                            }
+                            // #endregion
+                          }}
+                          className="hidden flex-col lg:flex">
+                          <span className="text-sm leading-tight truncate max-w-[140px] xl:max-w-[180px]">
                             {cat.name}
                           </span>
                           {cat.isPromo && (
-                            <span className="mt-0.5 text-[10px] text-slate-500">
+                            <span className="mt-0.5 text-[10px] text-slate-500 truncate max-w-[140px] xl:max-w-[180px]">
                               Акции и спецпредложения
                             </span>
                           )}
@@ -440,14 +492,14 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                       </span>
                       <ChevronRight
                         className={[
-                          "h-4 w-4 text-slate-400 transition-transform",
+                          "h-4 w-4 shrink-0 text-slate-400 transition-transform hidden lg:block",
                           isExpanded ? "rotate-90" : "",
                         ].join(" ")}
                       />
                     </button>
 
                     {isExpanded && subsForCat.length > 0 && (
-                      <div className="mt-1 space-y-0.5 pl-3">
+                      <div className="mt-1 space-y-0.5 pl-0 lg:pl-3 hidden lg:block">
                         {subsForCat.map((sub) => {
                           const isSubActive = activeSubcategoryId === sub.id;
                           const itemsForSub = baseItems.filter(
@@ -461,6 +513,7 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                                 onClick={() =>
                                   handleSubcategoryClick(sub.id)
                                 }
+                                title={sub.name}
                                 className={[
                                   "flex w-full items-center justify-between rounded-2xl px-3 py-1.5 text-left text-xs transition",
                                   isSubActive
@@ -468,7 +521,9 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                                     : "bg-transparent text-slate-700 hover:bg-surface-soft",
                                 ].join(" ")}
                               >
-                                <span>{sub.name}</span>
+                                <span className="truncate max-w-[140px] xl:max-w-[180px]">
+                                  {sub.name}
+                                </span>
                               </button>
 
                               {isSubActive && itemsForSub.length > 0 && (
@@ -483,6 +538,7 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                                         onClick={() =>
                                           handleItemClickFromTree(item.id)
                                         }
+                                        title={item.name}
                                         className={[
                                           "w-full rounded-2xl px-2 py-1 text-left text-[11px] transition",
                                           isItemActive
@@ -490,7 +546,9 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                                             : "text-slate-700 hover:text-slate-900",
                                         ].join(" ")}
                                       >
-                                        {item.name}
+                                        <span className="truncate block max-w-[140px] xl:max-w-[180px]">
+                                          {item.name}
+                                        </span>
                                       </button>
                                     );
                                   })}
@@ -561,49 +619,48 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
               </span>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {subcategoriesForCategory.map((sub) => (
-                <button
-                  key={sub.id}
-                  type="button"
-                  onClick={() => handleSubcategoryClick(sub.id)}
-                  className={[
-                    "rounded-full px-3 py-1 text-xs font-medium transition",
-                    activeSubcategoryId === sub.id
-                      ? "bg-slate-900 text-white"
-                      : "bg-surface-soft text-slate-700 hover:bg-slate-200",
-                  ].join(" ")}
-                >
-                  {sub.name}
-                </button>
-              ))}
-              {itemsForSubcategory.length === 0 && (
-                <span className="text-xs text-slate-500">
-                  Загрузка блюд…
-                </span>
-              )}
-            </div>
+            {subcategoriesForCategory.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {subcategoriesForCategory.map((sub) => (
+                  <MenuOptionButton
+                    key={sub.id}
+                    onClick={() => handleSubcategoryClick(sub.id)}
+                    isSelected={activeSubcategoryId === sub.id}
+                    variant="default"
+                    aria-label={`Выбрать подкатегорию: ${sub.name}`}
+                  >
+                    {sub.name}
+                  </MenuOptionButton>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-slate-500">
+                Нет доступных подкатегорий
+              </div>
+            )}
 
-            <div className="flex flex-wrap gap-2">
-              {itemsForSubcategory.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveItemId(item.id)}
-                  className={[
-                    "rounded-full px-3 py-1 text-xs font-medium transition",
-                    activeItemId === item.id
-                      ? "bg-brand text-white"
-                      : "bg-surface-soft text-slate-700 hover:bg-slate-200",
-                  ].join(" ")}
-                >
-                  {item.name}
-                </button>
-              ))}
-            </div>
+            {itemsForSubcategory.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {itemsForSubcategory.map((item) => (
+                  <MenuOptionButton
+                    key={item.id}
+                    onClick={() => setActiveItemId(item.id)}
+                    isSelected={activeItemId === item.id}
+                    variant="primary"
+                    aria-label={`Выбрать блюдо: ${item.name}`}
+                  >
+                    {item.name}
+                  </MenuOptionButton>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-slate-500">
+                Загрузка блюд…
+              </div>
+            )}
 
             {currentItem && (
-              <div className="rounded-2xl bg-surface-soft px-3 py-3 text-xs text-slate-600">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
                 {currentItem.description}
               </div>
             )}
@@ -617,9 +674,12 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                   tag={anonOffer.tag}
                   subtitle="Анонимное заведение. Подберём самый дешёвый и ближайший вариант"
                   imageUrl={anonOffer.imageUrl ?? undefined}
+                  quantity={quantities[anonOffer.id] ?? 0}
+                  onAdd={() => add(anonOffer.id)}
+                  onRemove={() => remove(anonOffer.id)}
                 />
               ) : (
-                <div className="flex flex-col justify-center rounded-2xl border border-dashed border-slate-200 bg-surface-soft p-4 text-xs text-slate-500">
+                <div className="flex flex-col justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600">
                   Для этой позиции пока нет анонимных предложений.
                 </div>
               )}
@@ -635,7 +695,7 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                 </div>
 
                 {brandedOffers.length === 0 ? (
-                  <div className="rounded-2xl bg-surface-soft p-3 text-xs text-slate-500">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                     Пока нет брендированных предложений для этой позиции.
                   </div>
                 ) : (
@@ -772,24 +832,13 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                                     : "В избранное"}
                                 </span>
                               </button>
-                              <div className="mt-2 flex items-center gap-3 rounded-full bg-surface-soft px-3 py-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => remove(offer.id)}
-                                  className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-sm text-slate-700 hover:bg-slate-100"
-                                >
-                                  —
-                                </button>
-                                <span className="w-4 text-center text-sm font-medium text-slate-900">
-                                  {quantity}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => add(offer.id)}
-                                  className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-sm text-slate-700 hover:bg-slate-100"
-                                >
-                                  +
-                                </button>
+                              <div className="mt-2 flex items-center justify-between rounded-full bg-surface-soft px-3 py-1.5">
+                                <QuantityControls
+                                  quantity={quantity}
+                                  onAdd={() => add(offer.id)}
+                                  onRemove={() => remove(offer.id)}
+                                  size="sm"
+                                />
                                 <div className="flex items-center gap-2">
                                   {lineOldPrice && (
                                     <span className="text-xs text-slate-400 line-through">
@@ -804,7 +853,7 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
                             </div>
                           </div>
 
-                          <div className="flex flex-col gap-2 rounded-2xl bg-surface-soft px-3 py-2">
+                          <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
                             <label className="text-[11px] font-semibold text-slate-700">
                               Комментарий для кухни
                             </label>
@@ -937,7 +986,7 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
               </div>
             )}
 
-            <div className="rounded-3xl bg-surface-soft p-3 text-xs text-slate-600 shadow-vilka-soft">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 shadow-vilka-soft">
               <p className="font-semibold text-slate-800">
                 Вилка пока не везде
               </p>
