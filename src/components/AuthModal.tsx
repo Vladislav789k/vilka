@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-  ChangeEvent,
-  useRef,
-  KeyboardEvent,
-} from "react";
+import { useEffect, useState, ChangeEvent, useRef, KeyboardEvent } from "react";
 import { ArrowLeft, X } from "lucide-react";
 
 type AuthModalProps = {
@@ -14,11 +8,12 @@ type AuthModalProps = {
   onClose: () => void;
 };
 
-const MAX_PHONE_DIGITS = 10; // цифр после +7
-const VALID_CODE = "1234";   // заглушка: правильный код (заменишь на свой)
+const MAX_PHONE_DIGITS = 10; // цифры после +7
+const VALID_CODE = "1234"; // заглушка: правильный код (заменишь на свой)
 
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [step, setStep] = useState<"phone" | "code">("phone");
+  const [closing, setClosing] = useState(false);
 
   // телефон: храним только цифры после +7
   const [phoneDigits, setPhoneDigits] = useState("");
@@ -55,6 +50,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       setCode(["", "", "", ""]);
       setCodeError(false);
       setTimer(60);
+      setClosing(false); // сбрасываем статус закрытия
     }
   }, [isOpen]);
 
@@ -71,10 +67,6 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     return () => window.clearInterval(id);
   }, [step]);
-
-  if (!isOpen) return null;
-
-  /* ========== Телефон ========== */
 
   const handlePhoneChange = (e: ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -93,8 +85,6 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     setPhoneDigits(digits);
   };
-
-  /* ========== Код из СМС ========== */
 
   const handleCodeChange = (index: number, value: string) => {
     const digit = value.replace(/\D/g, "").slice(0, 1);
@@ -141,23 +131,34 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  /* ========== JSX ========== */
+  const closeModal = () => {
+    setClosing(true); // начинаем анимацию закрытия
+    setTimeout(() => {
+      onClose();
+    }, 500); // ждем окончания анимации (500 мс)
+  };
+
+  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
-      <div className="relative w-full max-w-md rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft">
+    <div className="fixed inset-0 z-40 flex items-center justify-end bg-black/40 px-4">
+      <div
+        className={`auth-modal relative w-full max-w-md rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft ${
+          closing ? "closing" : ""
+        }`}
+      >
         {/* Верхняя панель */}
         <div className="mb-8 flex items-center justify-between">
           <button
             type="button"
-            onClick={() => (step === "phone" ? onClose() : setStep("phone"))}
+            onClick={() => (step === "phone" ? closeModal() : setStep("phone"))}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
           <button
             type="button"
-            onClick={onClose}
+            onClick={closeModal}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
           >
             <X className="h-4 w-4" />
@@ -182,7 +183,6 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               onClick={() => {
                 if (isPhoneComplete) {
                   setStep("code");
-                  // фокус на первый инпут
                   setTimeout(() => {
                     codeInputsRef.current[0]?.focus();
                   }, 0);
@@ -251,7 +251,6 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 <span>{formatTimer(timer)}</span>
               </div>
             </div>
-            {/* Кнопки больше нет — код проверяется автоматически */}
           </>
         )}
       </div>

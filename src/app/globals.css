@@ -78,3 +78,49 @@ body {
     }
   }
 }
+
+@keyframes slideInFromRight {
+  from {
+    transform: translateX(100%); /* Начальная позиция справа */
+  }
+  to {
+    transform: translateX(0); /* Конечная позиция */
+  }
+}
+
+@keyframes slideInFromRight {
+  from {
+    transform: translateX(100%); /* Начальная позиция справа */
+  }
+  to {
+    transform: translateX(0); /* Конечная позиция */
+  }
+}
+
+@keyframes slideOutToRight {
+  from {
+    transform: translateX(0); /* Начальная позиция */
+  }
+  to {
+    transform: translateX(100%); /* Конечная позиция */
+  }
+}
+
+/* Класс для модального окна */
+.auth-modal {
+  animation: slideInFromRight 0.5s ease-out forwards;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 350px; /* Размер модального окна */
+  height: 100%;
+  background-color: white;
+  box-shadow: -4px 0px 15px rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  z-index: 9999;
+}
+
+/* При закрытии окна */
+.auth-modal.closing {
+  animation: slideOutToRight 0.5s ease-out forwards;
+}
