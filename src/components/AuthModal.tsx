@@ -12,12 +12,13 @@ import { ArrowLeft, X } from "lucide-react";
 type AuthModalProps = {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
 };
 
 const MAX_PHONE_DIGITS = 10; // цифр после +7
 const VALID_CODES = ["0000", "1111"]; // технические коды для авторизации
 
-const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [step, setStep] = useState<"phone" | "code">("phone");
 
   // телефон: храним только цифры после +7
@@ -165,9 +166,14 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
       // Успешная авторизация
       onClose();
-      // Перезагружаем страницу для обновления состояния
-      if (typeof window !== "undefined") {
-        window.location.reload();
+      // Вызываем callback для обновления состояния пользователя
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        // Если callback не передан, перезагружаем страницу
+        if (typeof window !== "undefined") {
+          window.location.reload();
+        }
       }
     } catch (e) {
       console.error("Auth error:", e);
@@ -176,6 +182,8 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   };
 
   /* ========== JSX ========== */
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
@@ -291,6 +299,4 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       </div>
     </div>
   );
-};
-
-export default AuthModal;
+}

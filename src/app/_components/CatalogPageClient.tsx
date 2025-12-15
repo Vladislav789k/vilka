@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { ShoppingBag, MapPin, User, Search, Clock, ChevronRight } from "lucide-react";
 
@@ -114,6 +114,12 @@ function CatalogUI({
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isAddressOpen, setIsAddressOpen] = useState(false);
   const [currentAddressLabel, setCurrentAddressLabel] = useState<string>("Указать адрес доставки");
+  const [user, setUser] = useState<{ id: number; phone: string; role: string } | null>(null);
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  // Важно: desktop и mobile хедеры одновременно в DOM (только CSS скрывает),
+  // поэтому один ref на два элемента ломает "click outside" (закрывает меню до клика по пунктам).
+  const profileDropdownRefDesktop = useRef<HTMLDivElement | null>(null);
+  const profileDropdownRefMobile = useRef<HTMLDivElement | null>(null);
 
   // анимация "надавливания" для карточек (через capture, чтобы работало даже если внутри stopPropagation)
   // Замените существующее состояние pressedCardId на:
@@ -217,6 +223,48 @@ function CatalogUI({
   const currentSubcategory = subcategories.find((s) => s.id === activeSubcategoryId);
   const currentItem = baseItems.find((i) => i.id === activeItemId);
 
+  // Загружаем информацию о пользователе
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data.user);
+        }
+      } catch (err) {
+        console.error("Failed to load user:", err);
+      }
+    };
+    loadUser();
+  }, []);
+
+  // Закрываем выпадающее меню при клике вне его
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+
+      const inDesktop =
+        profileDropdownRefDesktop.current ? profileDropdownRefDesktop.current.contains(target) : false;
+      const inMobile =
+        profileDropdownRefMobile.current ? profileDropdownRefMobile.current.contains(target) : false;
+
+      if (!inDesktop && !inMobile) {
+        setIsProfileDropdownOpen(false);
+      }
+    };
+
+    if (isProfileDropdownOpen) {
+      // Важно: используем "click", а не "mousedown", иначе меню может закрыться
+      // на mousedown и "Выйти" не успевает обработать клик/переход.
+      document.addEventListener("click", handleClickOutside);
+      return () => {
+        document.removeEventListener("click", handleClickOutside);
+      };
+    }
+  }, [isProfileDropdownOpen]);
+
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-surface-soft">
       <header className="shrink-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur">
@@ -256,14 +304,55 @@ function CatalogUI({
                   <span className="max-w-[220px] truncate">{currentAddressLabel}</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setIsAuthOpen(true)}
-                  className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
-                >
-                  <User className="h-3.5 w-3.5" />
-                  <span>Войти</span>
-                </button>
+                {user ? (
+                  <div className="relative hidden md:block" ref={profileDropdownRefDesktop}>
+                    <button
+                      type="button"
+                      onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                      className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
+                    >
+                      <User className="h-3.5 w-3.5" />
+                      <span>Профиль</span>
+                      <svg className={`h-3 w-3 transition-transform ${isProfileDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {isProfileDropdownOpen && (
+                      <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-slate-200 bg-white shadow-lg">
+                        <div className="p-2">
+                          <div className="px-3 py-2 text-xs text-slate-500">
+                            {user.phone}
+                          </div>
+                          <a
+                            href="/api/auth/logout"
+                            onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                              // Фоллбек: гарантируем навигацию даже если React/оверлеи вмешаются
+                              e.preventDefault();
+                              e.stopPropagation();
+                              window.location.assign("/api/auth/logout");
+                            }}
+                            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                            </svg>
+                            <span>Выйти</span>
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsAuthOpen(true)}
+                    className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
+                  >
+                    <User className="h-3.5 w-3.5" />
+                    <span>Войти</span>
+                  </button>
+                )}
 
                 <div className="relative">
                   <button
@@ -351,13 +440,49 @@ function CatalogUI({
               <span className="truncate">{currentAddressLabel}</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setIsAuthOpen(true)}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
-            >
-              <User className="h-4 w-4" />
-            </button>
+            {user ? (
+              <div className="relative" ref={profileDropdownRefMobile}>
+                <button
+                  type="button"
+                  onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
+                >
+                  <User className="h-4 w-4" />
+                </button>
+
+                {isProfileDropdownOpen && (
+                  <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-slate-200 bg-white shadow-lg">
+                    <div className="p-2">
+                      <div className="px-3 py-2 text-xs text-slate-500">
+                        {user.phone}
+                      </div>
+                      <a
+                        href="/api/auth/logout"
+                        onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          window.location.assign("/api/auth/logout");
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                        <span>Выйти</span>
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAuthOpen(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
+              >
+                <User className="h-4 w-4" />
+              </button>
+            )}
 
             <button className="flex h-8 items-center justify-center rounded-full bg-brand px-3 text-[11px] font-semibold text-white shadow-md shadow-brand/30 hover:bg-brand-dark">
               {cartButtonLabel}
@@ -1034,7 +1159,17 @@ function CatalogUI({
         </div>
       </footer>
 
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+      <AuthModal 
+        isOpen={isAuthOpen} 
+        onClose={() => setIsAuthOpen(false)}
+        onSuccess={() => {
+          // После успешного входа загружаем информацию о пользователе
+          fetch("/api/auth/me")
+            .then(res => res.json())
+            .then(data => setUser(data.user))
+            .catch(err => console.error("Failed to load user:", err));
+        }}
+      />
       <AddressModal
         isOpen={isAddressOpen}
         onClose={() => setIsAddressOpen(false)}

@@ -43,7 +43,9 @@ export type CartChange = {
 };
 
 const MIN_ORDER_SUM = 0; // TODO: load from restaurant-specific settings
-const CACHE_TTL_SECONDS = 60 * 10; // 10 minutes
+// Хотим, чтобы корзина реально сохранялась "между заходами".
+// Cookie cartToken живёт 30 дней → делаем TTL в Redis тоже длинным.
+const CACHE_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const cacheKey = (cartToken: string, userId: number | null) => 
   userId ? `cart:user:${userId}` : `cart:${cartToken}`;
 

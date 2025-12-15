@@ -7,6 +7,8 @@ export async function GET() {
   try {
     const cookieStore = await cookies();
     const userIdStr = cookieStore.get("vilka_user_id")?.value;
+    
+    console.log("[auth/me] vilka_user_id cookie:", userIdStr || "not found");
 
     if (!userIdStr) {
       return NextResponse.json({ user: null });
