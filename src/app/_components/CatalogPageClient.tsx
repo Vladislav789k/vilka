@@ -125,7 +125,6 @@ function CatalogUI({
   // Замените существующее состояние pressedCardId на:
   const [pressedCardId, setPressedCardId] = useState<string | number | null>(null);
   const [pressedCardState, setPressedCardState] = useState<'down' | 'up' | null>(null);
-  const ANON_CARD_ID = "__anon__";
 
   const initial = useMemo(() => getInitialSelection(catalog), [catalog]);
   const [activeCategoryId, setActiveCategoryId] = useState<CategoryId | null>(initial.categoryId);
@@ -173,6 +172,9 @@ function CatalogUI({
 
   const handleCategoryClick = (categoryId: CategoryId) => {
     setActiveCategoryId(categoryId);
+    // Reset deeper levels: user should explicitly choose subcategory (2nd) and item (3rd).
+    setActiveSubcategoryId(null);
+    setActiveItemId(null);
     toggleCategoryExpanded(categoryId);
   };
 
@@ -182,13 +184,12 @@ function CatalogUI({
 
     setActiveCategoryId(sub.categoryId);
     setActiveSubcategoryId(sub.id);
+    // 3rd level should be chosen by the user in the main content area.
+    setActiveItemId(null);
     setExpandedCategoryIds((prev) => (prev.includes(sub.categoryId) ? prev : [...prev, sub.categoryId]));
-
-    const itemsForSub = indexes.itemsBySubcategory.get(sub.id) ?? [];
-    if (itemsForSub.length > 0) setActiveItemId(itemsForSub[0].id);
   };
 
-  const handleItemClickFromTree = (itemId: BaseItemId) => {
+  const handleItemClick = (itemId: BaseItemId) => {
     const item = baseItems.find((i) => i.id === itemId);
     if (!item) return;
 
@@ -222,6 +223,126 @@ function CatalogUI({
   const currentCategory = categories.find((c) => c.id === activeCategoryId);
   const currentSubcategory = subcategories.find((s) => s.id === activeSubcategoryId);
   const currentItem = baseItems.find((i) => i.id === activeItemId);
+
+  const handleCategoryBreadcrumbClick = (categoryId: CategoryId) => {
+    setActiveCategoryId(categoryId);
+    setExpandedCategoryIds((prev) => (prev.includes(categoryId) ? prev : [...prev, categoryId]));
+
+    // We don't render 2nd level selector in the main content anymore, so pick a subcategory to drive 3rd level list.
+    const subs = indexes.subcategoriesByCategory.get(categoryId) ?? [];
+    const nextSub = subs[0]?.id ?? null;
+    setActiveSubcategoryId(nextSub);
+    setActiveItemId(null);
+  };
+
+  const handleSubcategoryBreadcrumbClick = (subcategoryId: SubcategoryId) => {
+    const sub = subcategories.find((s) => s.id === subcategoryId);
+    if (!sub) return;
+    setActiveCategoryId(sub.categoryId);
+    setExpandedCategoryIds((prev) => (prev.includes(sub.categoryId) ? prev : [...prev, sub.categoryId]));
+    setActiveSubcategoryId(sub.id);
+    setActiveItemId(null);
+  };
+
+  const breadcrumbLinkClasses =
+    "cursor-pointer text-slate-500 hover:text-slate-800 hover:underline underline-offset-4";
+  const breadcrumbActiveClasses = "font-medium text-slate-800";
+
+  const renderOffersBlock = (baseItem: (typeof baseItems)[number], offers: typeof offersForItem) => {
+    const anon = offers.find((o) => o.isAnonymous);
+    const branded = offers.filter((o) => !o.isAnonymous);
+
+    return (
+      <>
+        {/* Секция анонимных предложений */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-900">Анонимные предложения</span>
+            <span className="text-[11px] text-slate-500">Подберём самый дешёвый и ближайший вариант</span>
+          </div>
+
+          {anon ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div
+                className={[
+                  "transform-gpu cursor-pointer select-none transition-transform duration-100 ease-out hover:-translate-y-0.5",
+                  "[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95",
+                  pressedCardId === anon.id ? "scale-95" : "",
+                ].join(" ")}
+                onPointerDownCapture={() => setPressedCardId(anon.id)}
+                onPointerUpCapture={() => setPressedCardId((prev) => (prev === anon.id ? null : prev))}
+                onPointerCancelCapture={() => setPressedCardId((prev) => (prev === anon.id ? null : prev))}
+                onPointerLeave={() => setPressedCardId((prev) => (prev === anon.id ? null : prev))}
+              >
+                <AnonymousOfferCard
+                  name={anon.menuItemName}
+                  price={anon.price}
+                  oldPrice={anon.oldPrice}
+                  tag={anon.tag}
+                  subtitle={baseItem.description}
+                  imageUrl={anon.imageUrl ?? undefined}
+                  quantity={quantities[anon.id] ?? 0}
+                  onAdd={() => add(anon.id)}
+                  onRemove={() => remove(anon.id)}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600">
+              Для этой позиции пока нет анонимных предложений.
+            </div>
+          )}
+        </div>
+
+        {/* Секция брендовых предложений */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-900">Из заведений рядом</span>
+            <span className="text-[11px] text-slate-500">Заведения, которые показывают свой бренд</span>
+          </div>
+
+          {branded.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600">
+              Пока нет брендированных предложений для этой позиции.
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {branded.map((offer) => {
+                const isPressed = pressedCardId === offer.id;
+                return (
+                  <div
+                    key={offer.id}
+                    className={[
+                      "transform-gpu cursor-pointer select-none transition-transform duration-100 ease-out hover:-translate-y-0.5",
+                      "[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95",
+                      isPressed ? "scale-95" : "",
+                    ].join(" ")}
+                    onPointerDownCapture={() => setPressedCardId(offer.id)}
+                    onPointerUpCapture={() => setPressedCardId((prev) => (prev === offer.id ? null : prev))}
+                    onPointerCancelCapture={() => setPressedCardId((prev) => (prev === offer.id ? null : prev))}
+                    onPointerLeave={() => setPressedCardId((prev) => (prev === offer.id ? null : prev))}
+                  >
+                    <BrandedOfferCard
+                      itemName={offer.menuItemName}
+                      brand={offer.brand}
+                      price={offer.price}
+                      oldPrice={offer.oldPrice}
+                      tag={offer.tag}
+                      subtitle={baseItem.description}
+                      imageUrl={offer.imageUrl ?? undefined}
+                      quantity={quantities[offer.id] ?? 0}
+                      onAdd={() => add(offer.id)}
+                      onRemove={() => remove(offer.id)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </>
+    );
+  };
 
   // Загружаем информацию о пользователе
   useEffect(() => {
@@ -682,7 +803,6 @@ function CatalogUI({
                         <div className="mt-1 hidden space-y-0.5 pl-0 lg:block lg:pl-3">
                           {subsForCat.map((sub) => {
                             const isSubActive = activeSubcategoryId === sub.id;
-                            const itemsForSub = baseItems.filter((i) => i.subcategoryId === sub.id);
 
                             return (
                               <div key={sub.id}>
@@ -699,28 +819,6 @@ function CatalogUI({
                                 >
                                   <span className="truncate">{sub.name}</span>
                                 </button>
-
-                                {isSubActive && itemsForSub.length > 0 && (
-                                  <div className="mt-0.5 space-y-0.5 pl-4">
-                                    {itemsForSub.map((item) => {
-                                      const isItemActive = activeItemId === item.id;
-                                      return (
-                                        <button
-                                          key={item.id}
-                                          type="button"
-                                          onClick={() => handleItemClickFromTree(item.id)}
-                                          title={item.name}
-                                          className={[
-                                            "w-full min-w-0 rounded-2xl px-2 py-1 text-left text-[11px] transition",
-                                            isItemActive ? "text-slate-400" : "text-slate-700 hover:text-slate-900",
-                                          ].join(" ")}
-                                        >
-                                          <span className="block truncate">{item.name}</span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
                               </div>
                             );
                           })}
@@ -768,36 +866,54 @@ function CatalogUI({
                 </div>
               </div>
             </div>
-              <div className="text-xs text-slate-500">
-                {currentCategory?.name ?? "Категория"} <span>·</span> {currentSubcategory?.name ?? "Подкатегория"}{" "}
-                <span>·</span>{" "}
-                <span className="font-medium text-slate-800">{currentItem?.name ?? "Позиция"}</span>
-              </div>
+              <div className="text-xs">
+                {/* Level 1: not clickable */}
+                {currentCategory?.name ? (
+                  <span className="text-slate-500">{currentCategory.name}</span>
+                ) : (
+                  <span className="text-slate-500">Категория</span>
+                )}
 
-              {subcategoriesForCategory.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {subcategoriesForCategory.map((sub) => (
-                    <MenuOptionButton
-                      key={sub.id}
-                      onClick={() => handleSubcategoryClick(sub.id)}
-                      isSelected={activeSubcategoryId === sub.id}
-                      variant="default"
-                      aria-label={`Выбрать подкатегорию: ${sub.name}`}
+                <span className="text-slate-500"> · </span>
+
+                {/* Level 2: highlighted when 3rd level is not selected */}
+                {currentSubcategory?.id ? (
+                  activeItemId ? (
+                    <button
+                      type="button"
+                      className={breadcrumbLinkClasses}
+                      onClick={() => handleSubcategoryBreadcrumbClick(currentSubcategory.id)}
                     >
-                      {sub.name}
-                    </MenuOptionButton>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs text-slate-500">Нет доступных подкатегорий</div>
-              )}
+                      {currentSubcategory.name}
+                    </button>
+                  ) : (
+                    <span className={breadcrumbActiveClasses}>{currentSubcategory.name}</span>
+                  )
+                ) : (
+                  <span className={activeItemId ? "text-slate-500" : breadcrumbActiveClasses}>Подкатегория</span>
+                )}
+
+                {/* Level 3: show only when selected */}
+                {currentItem?.id && (
+                  <>
+                    <span className="text-slate-500"> · </span>
+                    <button
+                      type="button"
+                      className="font-medium text-slate-800 hover:underline underline-offset-4"
+                      onClick={() => handleItemClick(currentItem.id)}
+                    >
+                      {currentItem.name}
+                    </button>
+                  </>
+                )}
+              </div>
 
               {itemsForSubcategory.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {itemsForSubcategory.map((item) => (
                     <MenuOptionButton
                       key={item.id}
-                      onClick={() => setActiveItemId(item.id)}
+                      onClick={() => handleItemClick(item.id)}
                       isSelected={activeItemId === item.id}
                       variant="primary"
                       aria-label={`Выбрать блюдо: ${item.name}`}
@@ -810,102 +926,23 @@ function CatalogUI({
                 <div className="text-xs text-slate-500">Загрузка блюд…</div>
               )}
 
-              {/* Секция анонимных предложений */}
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-900">Анонимные предложения</span>
-                  <span className="text-[11px] text-slate-500">Подберём самый дешёвый и ближайший вариант</span>
+              {activeItemId && currentItem ? (
+                renderOffersBlock(currentItem, offersForItem)
+              ) : itemsForSubcategory.length > 0 ? (
+                <div className="flex flex-col gap-10">
+                  {itemsForSubcategory.map((item) => {
+                    const offers = indexes.offersByBaseItem.get(item.id) ?? [];
+                    if (offers.length === 0) return null;
+
+                    return (
+                      <div key={item.id} className="flex flex-col gap-6">
+                        <h2 className="text-4xl font-bold text-slate-900">{item.name}</h2>
+                        {renderOffersBlock(item, offers)}
+                      </div>
+                    );
+                  })}
                 </div>
-
-                {anonOffer ? (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div
-                      className={[
-                        "transform-gpu cursor-pointer select-none transition-transform duration-100 ease-out hover:-translate-y-0.5",
-                        "[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95",
-                        pressedCardId === ANON_CARD_ID ? "scale-95" : "",
-                      ].join(" ")}
-                      onPointerDownCapture={() => setPressedCardId(ANON_CARD_ID)}
-                      onPointerUpCapture={() =>
-                        setPressedCardId((prev) => (prev === ANON_CARD_ID ? null : prev))
-                      }
-                      onPointerCancelCapture={() =>
-                        setPressedCardId((prev) => (prev === ANON_CARD_ID ? null : prev))
-                      }
-                      onPointerLeave={() => setPressedCardId((prev) => (prev === ANON_CARD_ID ? null : prev))}
-                    >
-                      <AnonymousOfferCard
-                        name={anonOffer.menuItemName}
-                        price={anonOffer.price}
-                        oldPrice={anonOffer.oldPrice}
-                        tag={anonOffer.tag}
-                        subtitle={baseItems.find((i) => i.id === anonOffer.baseItemId)?.description}
-                        imageUrl={anonOffer.imageUrl ?? undefined}
-                        quantity={quantities[anonOffer.id] ?? 0}
-                        onAdd={() => add(anonOffer.id)}
-                        onRemove={() => remove(anonOffer.id)}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600">
-                    Для этой позиции пока нет анонимных предложений.
-                  </div>
-                )}
-              </div>
-
-              {/* Секция брендовых предложений */}
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-900">Из заведений рядом</span>
-                  <span className="text-[11px] text-slate-500">Заведения, которые показывают свой бренд</span>
-                </div>
-
-                {brandedOffers.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600">
-                    Пока нет брендированных предложений для этой позиции.
-                  </div>
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {brandedOffers.map((offer) => {
-                      const baseItem = baseItems.find((i) => i.id === offer.baseItemId);
-                      const isPressed = pressedCardId === offer.id;
-
-                      return (
-                        <div
-                          key={offer.id}
-                          className={[
-                            "transform-gpu cursor-pointer select-none transition-transform duration-100 ease-out hover:-translate-y-0.5",
-                            "[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95",
-                            isPressed ? "scale-95" : "",
-                          ].join(" ")}
-                          onPointerDownCapture={() => setPressedCardId(offer.id)}
-                          onPointerUpCapture={() =>
-                            setPressedCardId((prev) => (prev === offer.id ? null : prev))
-                          }
-                          onPointerCancelCapture={() =>
-                            setPressedCardId((prev) => (prev === offer.id ? null : prev))
-                          }
-                          onPointerLeave={() => setPressedCardId((prev) => (prev === offer.id ? null : prev))}
-                        >
-                          <BrandedOfferCard
-                            itemName={offer.menuItemName}
-                            brand={offer.brand}
-                            price={offer.price}
-                            oldPrice={offer.oldPrice}
-                            tag={offer.tag}
-                            subtitle={baseItem?.description}
-                            imageUrl={offer.imageUrl ?? undefined}
-                            quantity={quantities[offer.id] ?? 0}
-                            onAdd={() => add(offer.id)}
-                            onRemove={() => remove(offer.id)}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              ) : null}
           </section>
 
           <aside className="hidden h-full w-full shrink-0 overflow-y-auto lg:block">

@@ -66,5 +66,17 @@ describe("catalog selection helpers", () => {
     );
     expect(next.itemId).toBeNull();
   });
+
+  it("keeps item empty when user has not chosen a 3rd-level category yet", () => {
+    const next = ensureValidSelection(
+      { categoryId: "cat-a", subcategoryId: "cat-a:sub1", itemId: null },
+      indexes
+    );
+    expect(next).toEqual({
+      categoryId: "cat-a",
+      subcategoryId: "cat-a:sub1",
+      itemId: null,
+    });
+  });
 });
 

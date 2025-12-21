@@ -1,0 +1,19 @@
+0 verbose cli /Users/aleksej/.nvm/versions/node/v20.19.5/bin/node /Users/aleksej/.nvm/versions/node/v20.19.5/bin/npm
+1 info using npm@10.8.2
+2 info using node@v20.19.5
+3 silly config load:file:/Users/aleksej/.nvm/versions/node/v20.19.5/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/aleksej/Desktop/vilka3/vilka/.npmrc
+5 silly config load:file:/Users/aleksej/.npmrc
+6 silly config load:file:/Users/aleksej/.nvm/versions/node/v20.19.5/etc/npmrc
+7 verbose title npm run build
+8 verbose argv "run" "build"
+9 verbose logfile logs-max:10 dir:/Users/aleksej/Desktop/vilka3/vilka/.npm-cache/_logs/2025-12-21T14_55_02_000Z-
+10 verbose logfile /Users/aleksej/Desktop/vilka3/vilka/.npm-cache/_logs/2025-12-21T14_55_02_000Z-debug-0.log
+11 silly logfile done cleaning log files
+12 verbose cwd /Users/aleksej/Desktop/vilka3/vilka
+13 verbose os Darwin 24.6.0
+14 verbose node v20.19.5
+15 verbose npm  v10.8.2
+16 verbose exit 1
+17 verbose code 1
+18 error A complete log of this run can be found in: /Users/aleksej/Desktop/vilka3/vilka/.npm-cache/_logs/2025-12-21T14_55_02_000Z-debug-0.log

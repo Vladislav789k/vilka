@@ -37,6 +37,9 @@ export function ensureValidSelection(
     const items = indexes.itemsBySubcategory.get(nextSubcategoryId) ?? [];
     if (items.length === 0) {
       nextItemId = null;
+    } else if (nextItemId == null) {
+      // User hasn't chosen a 3rd-level category yet; keep it unselected.
+      nextItemId = null;
     } else if (!items.some((i) => i.id === nextItemId)) {
       nextItemId = items[0].id;
     }
