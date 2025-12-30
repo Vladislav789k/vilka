@@ -27,6 +27,47 @@ services:
     networks:
       - kasashka_net
 
+  minio:
+    image: minio/minio:latest
+    container_name: kasashka_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadminpassword
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - kasashka_net
+
+  # Создание bucket при первом старте (идемпотентно)
+  minio_init:
+    image: minio/mc:latest
+    container_name: kasashka_minio_init
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "Waiting for MinIO..."
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          sleep 1
+        done
+        echo "Ensuring bucket $$MINIO_BUCKET exists..."
+        mc mb -p "local/$$MINIO_BUCKET" >/dev/null 2>&1 || true
+        # bucket оставляем приватным — отдачу делаем через API-прокси приложения
+        echo "MinIO init done."
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadminpassword
+      MINIO_BUCKET: media
+    networks:
+      - kasashka_net
+
   app:
     build:
       context: .
@@ -44,9 +85,18 @@ services:
       # строка подключения к Redis из контейнера app
       REDIS_URL: redis://redis:6379
       NEXT_PUBLIC_API_BASE_URL: http://localhost
+      # MinIO (S3-compatible) для хранения изображений
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadminpassword
+      MINIO_BUCKET: media
     depends_on:
       - postgres
       - redis
+      - minio
+      - minio_init
     ports:
       - "3000:3000"
     networks:
@@ -67,6 +117,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  minio_data:
 
 networks:
   kasashka_net:

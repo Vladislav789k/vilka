@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import { Trash2 } from "lucide-react";
+import { Trash2, Upload, Image as ImageIcon, X } from "lucide-react";
 
 type BusinessItem = {
   id: number;
@@ -44,7 +44,8 @@ export default function BusinessPage() {
   const [composition, setComposition] = useState("");
   const [price, setPrice] = useState("");
   const [discountPercent, setDiscountPercent] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [stockQty, setStockQty] = useState("100");
   const [categoryId, setCategoryId] = useState<number | "">("");
   const [categoryQuery, setCategoryQuery] = useState("");
@@ -55,6 +56,24 @@ export default function BusinessPage() {
 
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
   const stockEditPrevRef = useRef<Record<number, number>>({});
+
+  // preview для выбранной картинки
+  useEffect(() => {
+    if (!imageFile) {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(null);
+      return;
+    }
+    const nextUrl = URL.createObjectURL(imageFile);
+    setImagePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return nextUrl;
+    });
+    return () => {
+      URL.revokeObjectURL(nextUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageFile]);
 
   // === Восстановление авторизации из localStorage ===
   useEffect(() => {
@@ -233,7 +252,6 @@ export default function BusinessPage() {
           composition: composition.trim() || null,
           price: Number(price),
           discountPercent: discountPercent ? Number(discountPercent) : null,
-          imageUrl: imageUrl.trim() || null,
           stockQty: stockQty ? Number(stockQty) : null,
           refCategoryId: Number(categoryId),
           isBrandAnonymous,
@@ -255,12 +273,41 @@ export default function BusinessPage() {
       const data = await res.json();
       const newId = (data as any).id as number;
 
+      // если выбрали картинку — загружаем её отдельно в MinIO и получаем URL
+      let uploadedImageUrl: string | null = null;
+      if (imageFile) {
+        try {
+          const fd = new FormData();
+          fd.set("file", imageFile);
+          const imgRes = await fetch(
+            `/api/business/menu-items/${newId}/image?restaurantId=${restaurantId}`,
+            { method: "POST", body: fd }
+          );
+          if (!imgRes.ok) {
+            let err = "Не удалось загрузить изображение";
+            try {
+              const errData = await imgRes.json();
+              if ((errData as any).error) err = (errData as any).error;
+            } catch {
+              /* ignore */
+            }
+            // блюдо создано, но картинка не загрузилась
+            console.error(err);
+          } else {
+            const imgData = await imgRes.json();
+            uploadedImageUrl = ((imgData as any).imageUrl as string) ?? null;
+          }
+        } catch (e) {
+          console.error("Ошибка сети при загрузке изображения:", e);
+        }
+      }
+
       // очистка формы
       setName("");
       setComposition("");
       setPrice("");
       setDiscountPercent("");
-      setImageUrl("");
+      setImageFile(null);
       setStockQty("100");
       setCategoryId("");
       setCategoryQuery("");
@@ -274,7 +321,7 @@ export default function BusinessPage() {
           composition: composition || null,
           price: Number(price),
           discount_percent: discountPercent ? Number(discountPercent) : null,
-          image_url: imageUrl || null,
+          image_url: uploadedImageUrl,
           ref_category_id: Number(categoryId),
           is_brand_anonymous: isBrandAnonymous,
           is_active: true,
@@ -669,16 +716,74 @@ export default function BusinessPage() {
                     />
                   </label>
 
-                  <label className="text-xs text-slate-600">
-                    Ссылка на картинку блюда
-                    <input
-                      type="text"
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      placeholder="https://..."
-                      className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
-                    />
-                  </label>
+                  <div className="text-xs text-slate-600">
+                    <div className="mb-1">Фото блюда</div>
+                    {!imagePreviewUrl ? (
+                      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-surface-soft px-4 py-6 transition-colors hover:border-brand hover:bg-slate-50">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-vilka-soft">
+                          <Upload className="h-5 w-5 text-slate-600" />
+                        </div>
+                        <div className="text-center">
+                          <span className="font-medium text-slate-700">
+                            Нажмите для загрузки
+                          </span>
+                          <span className="block text-[11px] text-slate-500">
+                            или перетащите изображение
+                          </span>
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+                          className="hidden"
+                        />
+                      </label>
+                    ) : (
+                      <div className="relative rounded-2xl border border-slate-200 bg-white p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="relative h-20 w-20 overflow-hidden rounded-2xl bg-surface-soft">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={imagePreviewUrl}
+                              alt="Предпросмотр"
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 text-xs text-slate-700">
+                              <ImageIcon className="h-4 w-4 text-slate-500" />
+                              <span className="truncate font-medium">
+                                {imageFile?.name ?? "Изображение"}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setImageFile(null);
+                                setImagePreviewUrl(null);
+                              }}
+                              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                            >
+                              <X className="h-3 w-3" />
+                              Убрать фото
+                            </button>
+                          </div>
+                        </div>
+                        <label className="absolute bottom-3 right-3">
+                          <span className="vilka-btn-primary flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold">
+                            <Upload className="h-3 w-3" />
+                            Заменить
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
 
                   <div className="pt-2">
                     <button
