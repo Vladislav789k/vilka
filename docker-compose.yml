@@ -114,10 +114,113 @@ services:
     networks:
       - kasashka_net
 
+  # База данных для Zabbix
+  zabbix_db:
+    image: postgres:15-alpine
+    container_name: kasashka_zabbix_db
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_password
+      POSTGRES_DB: zabbix
+    ports:
+      - "5433:5432"
+    volumes:
+      - zabbix_db_data:/var/lib/postgresql/data
+    networks:
+      - kasashka_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Zabbix Server
+  zabbix_server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
+    container_name: kasashka_zabbix_server
+    depends_on:
+      zabbix_db:
+        condition: service_healthy
+    # docker compose по умолчанию читает только .env, а не .env.local
+    # поэтому явно подключаем .env.local (где у тебя лежит TELEGRAM_BOT_TOKEN)
+    env_file:
+      - .env.local
+    environment:
+      DB_SERVER_HOST: zabbix_db
+      DB_SERVER_PORT: 5432
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_password
+      POSTGRES_DB: zabbix
+      # Telegram переменные берём из env_file (.env.local), чтобы не затирать их пустыми значениями
+    ports:
+      - "10051:10051"
+    volumes:
+      - zabbix_server_data:/var/lib/zabbix
+      - ./infra/zabbix/alertscripts:/usr/lib/zabbix/alertscripts:ro
+      - ./infra/zabbix/externalscripts:/usr/lib/zabbix/externalscripts:ro
+    networks:
+      - kasashka_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 10051 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Zabbix Web Interface
+  zabbix_web:
+    image: zabbix/zabbix-web-apache-pgsql:alpine-7.0-latest
+    container_name: kasashka_zabbix_web
+    depends_on:
+      - zabbix_db
+      - zabbix_server
+    environment:
+      ZBX_SERVER_HOST: zabbix_server
+      DB_SERVER_HOST: zabbix_db
+      DB_SERVER_PORT: 5432
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_password
+      POSTGRES_DB: zabbix
+      PHP_TZ: Europe/Moscow
+    ports:
+      - "8080:8080"
+    networks:
+      - kasashka_net
+    restart: unless-stopped
+
+  # Zabbix Agent для мониторинга контейнеров
+  zabbix_agent:
+    # Важно: для шаблона "Docker by Zabbix agent 2" нужен именно agent2
+    image: zabbix/zabbix-agent2:alpine-7.0-latest
+    container_name: kasashka_zabbix_agent
+    depends_on:
+      zabbix_server:
+        condition: service_healthy
+    environment:
+      ZBX_HOSTNAME: docker-host
+      ZBX_SERVER_HOST: zabbix_server
+      ZBX_SERVER_PORT: 10051
+      # Agent2: активные проверки (опционально, но помогает с авто-регистрацией/связью)
+      ZBX_SERVER_ACTIVE: zabbix_server
+      ZBX_TIMEOUT: 30
+    volumes:
+      # Docker socket для docker-плагина Agent2 (обязательно)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Конфиг docker-плагина Agent2 (без правки основного конфига entrypoint'ом)
+      - ./infra/zabbix/zabbix_agent2.d/plugins.d/docker.conf:/etc/zabbix/zabbix_agent2.d/plugins.d/docker.conf:ro
+    # На некоторых системах docker.sock доступен не всем пользователям — проще читать его от root
+    user: "0:0"
+    networks:
+      - kasashka_net
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  zabbix_db_data:
+  zabbix_server_data:
 
 networks:
   kasashka_net:
