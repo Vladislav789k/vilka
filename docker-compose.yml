@@ -114,6 +114,18 @@ services:
     networks:
       - kasashka_net
 
+  # Dozzle — веб-интерфейс для просмотра логов Docker контейнеров
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: kasashka_dozzle
+    ports:
+      - "9999:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - kasashka_net
+    restart: unless-stopped
+
   # База данных для Zabbix
   zabbix_db:
     image: postgres:15-alpine
