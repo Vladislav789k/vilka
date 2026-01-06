@@ -15,6 +15,7 @@ type CartContextValue = {
   offerStocks: Record<OfferId, number | undefined>;
   add: (offerId: OfferId) => void;
   remove: (offerId: OfferId) => void;
+  reload: () => Promise<void>;
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -30,24 +31,20 @@ export function CartProvider({ offers, children }: CartProviderProps) {
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasLoadedRef = useRef(false);
 
-  // Загружаем корзину из Redis при монтировании
-  useEffect(() => {
-    if (hasLoadedRef.current) return;
-    hasLoadedRef.current = true;
+  const loadCartFromServer = useRef(
+    async (opts?: { mergeIfHasExisting?: boolean }) => {
+      const mergeIfHasExisting = opts?.mergeIfHasExisting ?? false;
 
-    const loadCart = async () => {
       // Skip if not in browser
       if (typeof window === "undefined") {
         setIsLoading(false);
         return;
       }
 
+      setIsLoading(true);
       try {
         console.log("[CartProvider] Loading cart from server");
-        const res = await fetch("/api/cart/load", {
-          method: "GET",
-        }).catch((fetchError) => {
-          // Handle network errors gracefully
+        const res = await fetch("/api/cart/load", { method: "GET" }).catch((fetchError) => {
           console.error("[CartProvider] Fetch error loading cart (network/connection):", fetchError);
           throw fetchError;
         });
@@ -55,47 +52,50 @@ export function CartProvider({ offers, children }: CartProviderProps) {
         if (res.ok) {
           const data = await res.json();
           console.log("[CartProvider] Cart loaded from server:", data);
-          
-          // Преобразуем items из сервера в CartState
-          // Важно: сервер возвращает числовые offerId, но в CartState ключи - строки
+
           const quantities: CartState = {};
           if (data.items && Array.isArray(data.items)) {
             for (const item of data.items) {
               const stringId = String(item.offerId);
               quantities[stringId] = item.quantity;
-              console.log(`[CartProvider] Loading item: ${item.offerId} (number) -> "${stringId}" (string), qty: ${item.quantity}`);
+              console.log(
+                `[CartProvider] Loading item: ${item.offerId} (number) -> "${stringId}" (string), qty: ${item.quantity}`
+              );
             }
           }
-          
-          // Устанавливаем состояние, но не триггерим синхронизацию
-          // Используем функциональное обновление, чтобы не перезаписать товары, добавленные во время загрузки
-          setCart((prev) => {
-            // Если корзина уже содержит товары (добавленные во время загрузки), сохраняем их
-            const hasExistingItems = Object.values(prev).some(qty => qty > 0);
-            if (hasExistingItems) {
-              console.log("[CartProvider] Merging loaded cart with existing items:", prev, "+", quantities);
-              // Объединяем: приоритет у загруженных данных, но если есть новые товары - сохраняем их
-              return { ...prev, ...quantities };
-            }
-            return quantities;
-          });
-          console.log("[CartProvider] Cart state updated from server:", quantities);
+
+          if (mergeIfHasExisting) {
+            setCart((prev) => {
+              const hasExistingItems = Object.values(prev).some((qty) => qty > 0);
+              if (hasExistingItems) {
+                console.log("[CartProvider] Merging loaded cart with existing items:", prev, "+", quantities);
+                return { ...prev, ...quantities };
+              }
+              return quantities;
+            });
+          } else {
+            // IMPORTANT: replace state (used after auth changes) to avoid syncing stale/empty cart over user cart
+            setCart(quantities);
+          }
         } else {
           console.error("[CartProvider] Failed to load cart:", res.status);
         }
       } catch (err) {
-        // Log error but don't break the app - cart will work in offline mode
         console.error("[CartProvider] Error loading cart:", err);
-        // If it's a network error, we can continue with empty cart
         if (err instanceof TypeError && err.message === "Failed to fetch") {
-          console.warn("[CartProvider] Network error - continuing with empty cart");
+          console.warn("[CartProvider] Network error - continuing with current cart");
         }
       } finally {
         setIsLoading(false);
       }
-    };
+    }
+  );
 
-    loadCart();
+  // Загружаем корзину из Redis при монтировании
+  useEffect(() => {
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    loadCartFromServer.current({ mergeIfHasExisting: true });
   }, []);
 
   const syncWithServer = useRef(async (quantities: CartState) => {
@@ -235,6 +235,7 @@ export function CartProvider({ offers, children }: CartProviderProps) {
     setCart((prev) => updateCartQuantity(prev, offerId, 1));
   const remove = (offerId: OfferId) =>
     setCart((prev) => updateCartQuantity(prev, offerId, -1));
+  const reload = async () => loadCartFromServer.current({ mergeIfHasExisting: false });
 
   const entries = useMemo(() => buildCartEntries(cart, offers), [cart, offers]);
   const totals = useMemo(() => calculateTotals(entries), [entries]);
@@ -248,6 +249,7 @@ export function CartProvider({ offers, children }: CartProviderProps) {
       offerStocks,
       add,
       remove,
+      reload,
     }),
     [cart, entries, totals, offerStocks]
   );

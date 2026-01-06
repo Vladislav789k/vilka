@@ -71,7 +71,7 @@ function CatalogUI({
   catalog,
   indexes,
 }: CatalogPageClientProps & { indexes: CatalogIndexes }) {
-  const { quantities, entries, totals, offerStocks, add, remove } = useCart();
+  const { quantities, entries, totals, offerStocks, add, remove, reload: reloadCart } = useCart();
 
   // #region agent log
   useEffect(() => {
@@ -117,7 +117,12 @@ function CatalogUI({
   const [isAddressOpen, setIsAddressOpen] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [currentAddressLabel, setCurrentAddressLabel] = useState<string>("Указать адрес доставки");
-  const [user, setUser] = useState<{ id: number; phone: string; role: string } | null>(null);
+  const [user, setUser] = useState<{
+    id: number;
+    phone: string;
+    role: string;
+    telegram?: { username?: string | null; firstName?: string | null; lastName?: string | null } | null;
+  } | null>(null);
   const [pendingAddOfferId, setPendingAddOfferId] = useState<number | null>(null);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   // Важно: desktop и mobile хедеры одновременно в DOM (только CSS скрывает),
@@ -402,10 +407,10 @@ function CatalogUI({
   }, [isProfileDropdownOpen]);
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-background transition-colors">
-      <header className="shrink-0 z-40 border-b border-border bg-card backdrop-blur dark:bg-white/10 dark:backdrop-blur-md">
+    <main className="flex h-screen flex-col overflow-hidden bg-surface-soft transition-colors dark:bg-background">
+      <header className="shrink-0 z-40 border-b border-slate-200 bg-white dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
         <div className="hidden md:block">
-          <div className="bg-card backdrop-blur dark:bg-white/10 dark:backdrop-blur-md">
+          <div className="bg-white dark:bg-white/10 dark:backdrop-blur-md">
             <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-6 py-3">
               <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
                 <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-light shadow-vilka-soft">
@@ -471,7 +476,13 @@ function CatalogUI({
                       <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-border bg-card shadow-lg dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
                         <div className="p-2">
                           <div className="px-3 py-2 text-xs text-foreground-muted">
-                            {user.phone}
+                            {user.phone.startsWith("tg:")
+                              ? user.telegram?.username
+                                ? `@${user.telegram.username}`
+                                : user.telegram?.firstName || user.telegram?.lastName
+                                ? `Telegram • ${(user.telegram.firstName ?? "").trim()} ${(user.telegram.lastName ?? "").trim()}`.trim()
+                                : "Telegram"
+                              : user.phone}
                           </div>
                           <a
                             href="/api/auth/logout"
@@ -578,7 +589,7 @@ function CatalogUI({
         </div>
 
         <div className="md:hidden">
-          <div className="mx-auto flex w-full max-w-7xl items-center gap-3 bg-background px-4 pt-3 pb-2">
+          <div className="mx-auto flex w-full max-w-7xl items-center gap-3 bg-white px-4 pt-3 pb-2 dark:bg-background">
             <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
               <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-brand-light shadow-vilka-soft">
                 <span className="text-base font-bold text-brand-dark">V</span>
@@ -610,7 +621,13 @@ function CatalogUI({
                   <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-border bg-card shadow-lg dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
                     <div className="p-2">
                       <div className="px-3 py-2 text-xs text-foreground-muted">
-                        {user.phone}
+                        {user.phone.startsWith("tg:")
+                          ? user.telegram?.username
+                            ? `@${user.telegram.username}`
+                            : user.telegram?.firstName || user.telegram?.lastName
+                            ? `Telegram • ${(user.telegram.firstName ?? "").trim()} ${(user.telegram.lastName ?? "").trim()}`.trim()
+                            : "Telegram"
+                          : user.phone}
                       </div>
                       <a
                         href="/api/auth/logout"
@@ -656,7 +673,7 @@ function CatalogUI({
             </button>
           </div>
 
-          <div className="sticky top-0 z-30 bg-white/95 backdrop-blur">
+          <div className="sticky top-0 z-30 bg-white/95 backdrop-blur dark:bg-white/10 dark:backdrop-blur-md">
             <div className="mx-auto max-w-7xl px-4 pb-2">
               <div className="flex w-full items-center gap-3 rounded-full bg-surface-soft px-4 py-2 shadow-vilka-soft">
                 <Search className="h-4 w-4 text-foreground-muted" />
@@ -1225,7 +1242,7 @@ function CatalogUI({
         </div>
       </section>
 
-      <footer className="shrink-0 border-t border-border bg-card/80 backdrop-blur dark:bg-white/10 dark:backdrop-blur-md">
+      <footer className="shrink-0 border-t border-slate-200 bg-white dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
         <div className="flex w-full flex-col gap-2 px-6 py-3 text-xs text-foreground-muted md:flex-row md:items-center md:justify-between">
           <span>© {new Date().getFullYear()} Вилка. Доставка еды из ресторанов и пекарен.</span>
           <div className="flex flex-wrap gap-3">
@@ -1251,19 +1268,24 @@ function CatalogUI({
           setIsAuthOpen(false);
           setPendingAddOfferId(null);
         }}
-        onSuccess={() => {
+        onSuccess={async () => {
           // После успешного входа загружаем информацию о пользователе
-          fetch("/api/auth/me")
-            .then(res => res.json())
-            .then(data => {
-              setUser(data.user);
-              if (data.user && pendingAddOfferId != null) {
-                add(pendingAddOfferId);
-                setPendingAddOfferId(null);
-                setIsAuthOpen(false);
-              }
-            })
-            .catch(err => console.error("Failed to load user:", err));
+          try {
+            const res = await fetch("/api/auth/me");
+            const data = await res.json().catch(() => ({}));
+            setUser((data as any).user ?? null);
+
+            // IMPORTANT: подтягиваем серверную корзину под новым auth (иначе пустая локальная может затереть user-cart)
+            await reloadCart();
+
+            if ((data as any).user && pendingAddOfferId != null) {
+              add(pendingAddOfferId);
+              setPendingAddOfferId(null);
+              setIsAuthOpen(false);
+            }
+          } catch (err) {
+            console.error("Failed to load user:", err);
+          }
         }}
       />
       <AddressModal

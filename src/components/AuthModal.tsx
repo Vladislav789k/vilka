@@ -16,6 +16,10 @@ const VALID_CODES = ["0000", "1111"]; // технические коды для 
 export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [closing, setClosing] = useState(false);
+  const telegramMountRef = useRef<HTMLDivElement | null>(null);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
+  const telegramBootedRef = useRef(false);
+  const onSuccessRef = useRef<AuthModalProps["onSuccess"]>(onSuccess);
 
   // телефон: храним только цифры после +7
   const [phoneDigits, setPhoneDigits] = useState("");
@@ -53,8 +57,75 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       setCodeError(false);
       setTimer(60);
       setClosing(false); // сбрасываем статус закрытия
+      setTelegramError(null);
+      telegramBootedRef.current = false;
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
+
+  // Telegram Login Widget (renders its own button)
+  useEffect(() => {
+    if (!isOpen) return;
+    if (step !== "phone") return;
+
+    const mount = telegramMountRef.current;
+    if (!mount) return;
+
+    // Avoid re-mounting widget on every render (prevents blinking)
+    if (telegramBootedRef.current) return;
+    telegramBootedRef.current = true;
+
+    mount.innerHTML = "";
+
+    (window as any).onTelegramAuth = async (user: any) => {
+      try {
+        setTelegramError(null);
+        const res = await fetch("/api/auth/telegram", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(user),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setTelegramError((data as any)?.error ?? "telegram_auth_failed");
+          return;
+        }
+
+        // Сначала закрываем окно (анимация + гарантированное закрытие)
+        closeAfterAuth();
+
+        // Затем обновляем состояние пользователя
+        if (onSuccessRef.current) {
+          onSuccessRef.current();
+        } else if (typeof window !== "undefined") {
+          window.location.reload();
+        }
+      } catch (e) {
+        console.error("[AuthModal] Telegram auth error:", e);
+        setTelegramError("telegram_auth_failed");
+      }
+    };
+
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.setAttribute("data-telegram-login", "Vilka_Auth_bot");
+    script.setAttribute("data-size", "large");
+    script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    script.setAttribute("data-request-access", "write");
+    mount.appendChild(script);
+
+    return () => {
+      mount.innerHTML = "";
+      telegramBootedRef.current = false;
+      try {
+        delete (window as any).onTelegramAuth;
+      } catch {}
+    };
+  }, [isOpen, step]);
 
   // таймер на шаге ввода кода
   useEffect(() => {
@@ -136,6 +207,15 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
     window.setTimeout(() => {
       onClose();
     }, 500); // ждём окончания анимации
+  };
+
+  const closeAfterAuth = () => {
+    // если модалка уже "закрывается", не ждём — просим родителя закрыть сейчас
+    if (closing) {
+      onClose();
+      return;
+    }
+    closeModal();
   };
 
   const handleCodeSubmit = async (codeValue: string) => {
@@ -239,6 +319,18 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
             >
               Получить код
             </button>
+
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                или
+              </div>
+              <div ref={telegramMountRef} className="min-h-[44px]" />
+              {telegramError && (
+                <div className="text-xs font-semibold text-red-600 dark:text-red-400">
+                  Не удалось войти через Telegram ({telegramError})
+                </div>
+              )}
+            </div>
 
             <p className="mt-6 text-center text-base leading-relaxed text-black dark:text-white font-semibold">
               Продолжая авторизацию, вы соглашаетесь с{" "}

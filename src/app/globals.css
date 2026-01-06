@@ -5,7 +5,7 @@
 
 :root {
   /* Light theme design tokens */
-  --vilka-bg: #F6F7FB; /* мягкий серый фон страницы */
+  --vilka-bg: #F5F5F5; /* фон страницы (как bg-surface-soft) */
   --vilka-card: #FFFFFF; /* белый фон для карточек и поверхностей */
   --vilka-muted: #F5F5F5; /* приглушённый фон для второстепенных элементов */
   --vilka-border: rgba(226, 232, 240, 0.7); /* subtle border */

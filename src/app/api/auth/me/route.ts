@@ -19,8 +19,25 @@ export async function GET() {
       return NextResponse.json({ user: null });
     }
 
-    const { rows } = await query<{ id: number; phone: string; role: string }>(
-      `SELECT id, phone, role FROM users WHERE id = $1 AND is_active = true`,
+    const { rows } = await query<{
+      id: number;
+      phone: string;
+      role: string;
+      telegram_username: string | null;
+      telegram_first_name: string | null;
+      telegram_last_name: string | null;
+    }>(
+      `SELECT
+         u.id,
+         u.phone,
+         u.role,
+         ti.username AS telegram_username,
+         ti.first_name AS telegram_first_name,
+         ti.last_name AS telegram_last_name
+       FROM users u
+       LEFT JOIN telegram_identities ti ON ti.user_id = u.id
+       WHERE u.id = $1 AND u.is_active = true
+       LIMIT 1`,
       [userId]
     );
 
@@ -28,7 +45,23 @@ export async function GET() {
       return NextResponse.json({ user: null });
     }
 
-    return NextResponse.json({ user: rows[0] });
+    const u = rows[0];
+    const telegram = u.telegram_username || u.telegram_first_name || u.telegram_last_name
+      ? {
+          username: u.telegram_username,
+          firstName: u.telegram_first_name,
+          lastName: u.telegram_last_name,
+        }
+      : null;
+
+    return NextResponse.json({
+      user: {
+        id: u.id,
+        phone: u.phone,
+        role: u.role,
+        telegram,
+      },
+    });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ user: null });
