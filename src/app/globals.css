@@ -100,6 +100,28 @@ body {
   }
 }
 
+@keyframes chatModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chatModalOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
 /* Класс для модального окна */
 .auth-modal {
   animation: slideInFromRight 0.5s ease-out forwards;
@@ -117,4 +139,13 @@ body {
 /* При закрытии окна */
 .auth-modal.closing {
   animation: slideOutToRight 0.5s ease-out forwards;
+}
+
+/* Чат — центрированный модал как в макете */
+.chat-modal {
+  animation: chatModalIn 0.18s ease-out forwards;
+}
+
+.chat-modal.closing {
+  animation: chatModalOut 0.18s ease-in forwards;
 }

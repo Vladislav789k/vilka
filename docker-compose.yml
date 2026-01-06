@@ -126,6 +126,53 @@ services:
       - kasashka_net
     restart: unless-stopped
 
+  # LLM inference server (LLaMA 3.x Instruct via Ollama)
+  # App will call it over http://ollama:11434
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kasashka_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - kasashka_net
+    restart: unless-stopped
+
+  # Опционально: авто-загрузка модели при старте (нужен интернет)
+  # Укажите OLLAMA_MODEL в .env/.env.local, например: llama3.1:8b-instruct
+  ollama_init:
+    image: ollama/ollama:latest
+    container_name: kasashka_ollama_init
+    depends_on:
+      - ollama
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        # ВАЖНО: используем $$ чтобы docker compose не пытался интерполировать переменные в этом блоке
+        # По умолчанию берём более лёгкую модель (подходит для машин с 8GB RAM и меньше)
+        OLLAMA_MODEL="$${OLLAMA_MODEL:-llama3.2:3b}"
+        export OLLAMA_HOST="http://ollama:11434"
+        echo "Waiting for Ollama..."
+        # Не используем wget/curl (их может не быть в образе). Проверяем доступность через ollama CLI.
+        until ollama list >/dev/null 2>&1; do
+          sleep 1
+        done
+        echo "Pulling model: $${OLLAMA_MODEL}"
+        if ! ollama pull "$${OLLAMA_MODEL}"; then
+          echo "ERROR: Failed to pull model: $${OLLAMA_MODEL}"
+          exit 1
+        fi
+        echo "Ollama init done."
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - kasashka_net
+
   # База данных для Zabbix
   zabbix_db:
     image: postgres:15-alpine
@@ -233,6 +280,7 @@ volumes:
   minio_data:
   zabbix_db_data:
   zabbix_server_data:
+  ollama_data:
 
 networks:
   kasashka_net:

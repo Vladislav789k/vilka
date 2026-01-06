@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
-import { ShoppingBag, MapPin, User, Search, Clock, ChevronRight } from "lucide-react";
+import { ShoppingBag, MapPin, User, Search, Clock, ChevronRight, MessageCircle } from "lucide-react";
 
 import AuthModal from "@/components/AuthModal";
 import AddressModal from "@/components/AddressModal";
+import AIAssistantModal from "@/components/AIAssistantModal";
 import AnonymousOfferCard from "@/components/AnonymousOfferCard";
 import BrandedOfferCard from "@/components/BrandedOfferCard";
 import { MenuOptionButton } from "@/components/MenuOptionButton";
@@ -113,8 +114,10 @@ function CatalogUI({
   const [lineFavorites, setLineFavorites] = useState<Record<string, boolean>>({});
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isAddressOpen, setIsAddressOpen] = useState(false);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [currentAddressLabel, setCurrentAddressLabel] = useState<string>("Указать адрес доставки");
   const [user, setUser] = useState<{ id: number; phone: string; role: string } | null>(null);
+  const [pendingAddOfferId, setPendingAddOfferId] = useState<number | null>(null);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   // Важно: desktop и mobile хедеры одновременно в DOM (только CSS скрывает),
   // поэтому один ref на два элемента ломает "click outside" (закрывает меню до клика по пунктам).
@@ -197,6 +200,15 @@ function CatalogUI({
     setActiveSubcategoryId(item.subcategoryId);
     setActiveItemId(item.id);
     setExpandedCategoryIds((prev) => (prev.includes(item.categoryId) ? prev : [...prev, item.categoryId]));
+  };
+
+  const handleAddToCart = (offerId: number) => {
+    if (!user) {
+      setPendingAddOfferId(offerId);
+      setIsAuthOpen(true);
+      return;
+    }
+    add(offerId);
   };
 
   const subcategoriesForCategory = useMemo(
@@ -283,7 +295,7 @@ function CatalogUI({
                   imageUrl={anon.imageUrl ?? undefined}
                   quantity={quantities[anon.id] ?? 0}
                   isSoldOut={((offerStocks[anon.id] ?? anon.stock) ?? 0) <= 0}
-                  onAdd={() => add(anon.id)}
+                  onAdd={() => handleAddToCart(anon.id)}
                   onRemove={() => remove(anon.id)}
                 />
               </div>
@@ -333,7 +345,7 @@ function CatalogUI({
                       imageUrl={offer.imageUrl ?? undefined}
                       quantity={quantities[offer.id] ?? 0}
                       isSoldOut={((offerStocks[offer.id] ?? offer.stock) ?? 0) <= 0}
-                      onAdd={() => add(offer.id)}
+                      onAdd={() => handleAddToCart(offer.id)}
                       onRemove={() => remove(offer.id)}
                     />
                   </div>
@@ -418,14 +430,26 @@ function CatalogUI({
               </div>
 
               <div className="ml-auto flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsAddressOpen(true)}
-                  className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
-                >
-                  <MapPin className="h-3.5 w-3.5" />
-                  <span className="max-w-[220px] truncate">{currentAddressLabel}</span>
-                </button>
+                {user && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAssistantOpen(true)}
+                    className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    <span>Чат‑бот</span>
+                  </button>
+                )}
+                {user && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddressOpen(true)}
+                    className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
+                  >
+                    <MapPin className="h-3.5 w-3.5" />
+                    <span className="max-w-[220px] truncate">{currentAddressLabel}</span>
+                  </button>
+                )}
 
                 {user ? (
                   <div className="relative hidden md:block" ref={profileDropdownRefDesktop}>
@@ -527,7 +551,7 @@ function CatalogUI({
                               <div className="[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95">
                                 <QuantityControls
                                   quantity={quantity}
-                                  onAdd={() => add(offer.id)}
+                                      onAdd={() => handleAddToCart(offer.id)}
                                   onRemove={() => remove(offer.id)}
                                   canAdd={!isSoldOut}
                                   size="sm"
@@ -559,14 +583,16 @@ function CatalogUI({
               </div>
             </Link>
 
-            <button
-              type="button"
-              onClick={() => setIsAddressOpen(true)}
-              className="flex flex-1 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
-            >
-              <MapPin className="h-3.5 w-3.5" />
-              <span className="truncate">{currentAddressLabel}</span>
-            </button>
+            {user && (
+              <button
+                type="button"
+                onClick={() => setIsAddressOpen(true)}
+                className="flex flex-1 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
+              >
+                <MapPin className="h-3.5 w-3.5" />
+                <span className="truncate">{currentAddressLabel}</span>
+              </button>
+            )}
 
             {user ? (
               <div className="relative" ref={profileDropdownRefMobile}>
@@ -609,6 +635,17 @@ function CatalogUI({
                 className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
               >
                 <User className="h-4 w-4" />
+              </button>
+            )}
+
+            {user && (
+              <button
+                type="button"
+                onClick={() => setIsAssistantOpen(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
+                title="Чат‑бот"
+              >
+                <MessageCircle className="h-4 w-4" />
               </button>
             )}
 
@@ -1047,7 +1084,7 @@ function CatalogUI({
                                   <div className="[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95">
                                     <QuantityControls
                                       quantity={quantity}
-                                      onAdd={() => add(offer.id)}
+                                      onAdd={() => handleAddToCart(offer.id)}
                                       onRemove={() => remove(offer.id)}
                                       canAdd={!isSoldOut}
                                       size="sm"
@@ -1208,12 +1245,22 @@ function CatalogUI({
 
       <AuthModal 
         isOpen={isAuthOpen} 
-        onClose={() => setIsAuthOpen(false)}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setPendingAddOfferId(null);
+        }}
         onSuccess={() => {
           // После успешного входа загружаем информацию о пользователе
           fetch("/api/auth/me")
             .then(res => res.json())
-            .then(data => setUser(data.user))
+            .then(data => {
+              setUser(data.user);
+              if (data.user && pendingAddOfferId != null) {
+                add(pendingAddOfferId);
+                setPendingAddOfferId(null);
+                setIsAuthOpen(false);
+              }
+            })
             .catch(err => console.error("Failed to load user:", err));
         }}
       />
@@ -1221,6 +1268,10 @@ function CatalogUI({
         isOpen={isAddressOpen}
         onClose={() => setIsAddressOpen(false)}
         onSelectAddress={(label: string) => setCurrentAddressLabel(label)}
+      />
+      <AIAssistantModal
+        isOpen={isAssistantOpen}
+        onClose={() => setIsAssistantOpen(false)}
       />
     </main>
   );

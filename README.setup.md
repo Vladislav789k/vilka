@@ -49,11 +49,17 @@ This will:
 - Start Redis
 - Start the Next.js app container
 - Start Nginx reverse proxy
+- Start Ollama (LLM inference, optional)
 
 Access:
 - App: http://localhost (via Nginx) or http://localhost:3000 (direct)
 - Postgres: localhost:5432
 - Redis: localhost:6379
+- Ollama API: http://localhost:11434
+
+## AI ассистент (LLaMA 3.x)
+
+См. `README.ai.md`.
 
 ## Troubleshooting
 
