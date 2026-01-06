@@ -13,6 +13,52 @@ export function ThemeToggle() {
     setMounted(true);
   }, []);
 
+  // Shared function to trigger shimmer effect with random color variant
+  const triggerShimmerEffect = () => {
+    // Prevent multiple simultaneous triggers
+    if (document.body.classList.contains("theme-transitioning")) {
+      return;
+    }
+
+    const colorVariants = ["purple-blue", "blue-cyan", "pink-rose", "orange-amber", "green-emerald", "rainbow"];
+    
+    const colorPalettes: Record<string, { start: string; mid: string }> = {
+      "purple-blue": { start: "#8b5cf6", mid: "#3b82f6" },
+      "blue-cyan": { start: "#3b82f6", mid: "#06b6d4" },
+      "pink-rose": { start: "#ec4899", mid: "#f43f5e" },
+      "orange-amber": { start: "#f97316", mid: "#f59e0b" },
+      "green-emerald": { start: "#10b981", mid: "#059669" },
+      "rainbow": { start: "#ef4444", mid: "#8b5cf6" }
+    };
+    
+    const randomColorVariant = colorVariants[Math.floor(Math.random() * colorVariants.length)];
+    const palette = colorPalettes[randomColorVariant] || colorPalettes["purple-blue"];
+    
+    // Create gradient with selected colors (always left-to-right)
+    let gradient: string;
+    if (randomColorVariant === "rainbow") {
+      gradient = "linear-gradient(90deg, currentColor 0%, #ef4444 15%, #f97316 25%, #eab308 35%, #22c55e 45%, #3b82f6 55%, #8b5cf6 65%, #ec4899 75%, currentColor 85%, currentColor 100%)";
+    } else {
+      gradient = `linear-gradient(90deg, currentColor 0%, currentColor 20%, ${palette.start} 30%, ${palette.mid} 40%, ${palette.start} 50%, currentColor 60%, currentColor 100%)`;
+    }
+    
+    // Trigger transition effect
+    document.body.classList.add("theme-transitioning");
+    document.documentElement.classList.add("theme-transitioning");
+    document.body.setAttribute("data-shimmer-variant", randomColorVariant);
+    document.documentElement.setAttribute("data-shimmer-variant", randomColorVariant);
+    document.documentElement.style.setProperty("--gradient-direction", gradient);
+    
+    // Remove transition class after animation completes
+    setTimeout(() => {
+      document.body.classList.remove("theme-transitioning");
+      document.documentElement.classList.remove("theme-transitioning");
+      document.body.removeAttribute("data-shimmer-variant");
+      document.documentElement.removeAttribute("data-shimmer-variant");
+      document.documentElement.style.removeProperty("--gradient-direction");
+    }, 2000);
+  };
+
   if (!mounted) {
     return (
       <button
@@ -32,6 +78,11 @@ export function ThemeToggle() {
       onClick={() => {
         const newTheme = isDark ? "light" : "dark";
         console.log("[ThemeToggle] Switching theme from", theme, "to", newTheme);
+        
+        // Trigger shimmer effect before theme change
+        triggerShimmerEffect();
+        
+        // Change theme
         setTheme(newTheme);
       }}
       className="flex h-9 w-9 items-center justify-center rounded-full bg-card border border-border text-slate-700 transition-colors shadow-sm hover:bg-hover dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:border-white/10"

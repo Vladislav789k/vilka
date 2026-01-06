@@ -84,7 +84,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-screen w-full bg-background text-foreground transition-colors">
+      <body className="min-h-screen w-full bg-background text-foreground">
         <ThemeProvider 
           attribute="class" 
           defaultTheme="light" 

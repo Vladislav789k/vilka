@@ -68,6 +68,7 @@ html {
   margin: 0;
   padding: 0;
   background: rgb(var(--background));
+  transition: background-color 0.6s cubic-bezier(0.4, 0, 0.2, 1), color 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body {
@@ -76,7 +77,208 @@ body {
   padding: 0;
   background: rgb(var(--background));
   color: rgb(var(--foreground));
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.6s cubic-bezier(0.4, 0, 0.2, 1), color 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Smooth transitions for all theme-dependent properties */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 0.6s;
+}
+
+/* Faster transitions for interactive elements */
+button,
+a,
+input,
+select,
+textarea {
+  transition-duration: 0.3s;
+}
+
+/* Exclude specific elements from transition */
+svg,
+img,
+video,
+canvas,
+iframe,
+[class*="animate-"] {
+  transition-duration: 0s;
+}
+
+/* Theme transition animation - single left-to-right shimmer */
+@keyframes text-shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+/* Smooth theme transition overlay effect */
+.theme-transitioning {
+  position: relative;
+  overflow: hidden;
+}
+
+.theme-transitioning::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(139, 92, 246, 0.08) 0%,
+    rgba(59, 130, 246, 0.08) 50%,
+    rgba(139, 92, 246, 0.08) 100%
+  );
+  pointer-events: none;
+  z-index: 9999;
+  animation: fade-in 0.4s ease-in forwards, fade-in 0.4s ease-out 1.6s reverse forwards;
+  opacity: 0;
+  backdrop-filter: blur(0px);
+  transition: backdrop-filter 0.6s ease;
+}
+
+.theme-transitioning::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(139, 92, 246, 0.12) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+  z-index: 9998;
+  animation: fade-in 0.5s ease-in forwards, fade-in 0.5s ease-out 1.5s reverse forwards;
+  opacity: 0;
+}
+
+/* Base text selector for all variants - will be overridden by specific variants */
+.theme-transitioning p,
+.theme-transitioning span:not([class*="bg-"]):not([class*="border-"]),
+.theme-transitioning div:not([class*="bg-"]):not([class*="border-"]):not([class*="rounded"]):not([class*="shadow"]),
+.theme-transitioning h1,
+.theme-transitioning h2,
+.theme-transitioning h3,
+.theme-transitioning h4,
+.theme-transitioning h5,
+.theme-transitioning h6,
+.theme-transitioning a:not([class*="bg-"]):not([class*="button"]),
+.theme-transitioning button:not([class*="bg-brand"]):not([class*="bg-slate-900"]):not([class*="bg-emerald"]),
+.theme-transitioning label,
+.theme-transitioning input[type="text"]:not([class*="bg-"]),
+.theme-transitioning input[type="tel"]:not([class*="bg-"]),
+.theme-transitioning input[type="number"]:not([class*="bg-"]),
+.theme-transitioning textarea:not([class*="bg-"]),
+.theme-transitioning li,
+.theme-transitioning td,
+.theme-transitioning th {
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: var(--shimmer-animation, text-shimmer-left-right) 2s ease-in-out;
+  color: transparent;
+}
+
+/* Text shimmer effect with dynamic color gradient (single animation, multiple colors) */
+.theme-transitioning[data-shimmer-variant] p,
+.theme-transitioning[data-shimmer-variant] span:not([class*="bg-"]):not([class*="border-"]),
+.theme-transitioning[data-shimmer-variant] div:not([class*="bg-"]):not([class*="border-"]):not([class*="rounded"]):not([class*="shadow"]),
+.theme-transitioning[data-shimmer-variant] h1,
+.theme-transitioning[data-shimmer-variant] h2,
+.theme-transitioning[data-shimmer-variant] h3,
+.theme-transitioning[data-shimmer-variant] h4,
+.theme-transitioning[data-shimmer-variant] h5,
+.theme-transitioning[data-shimmer-variant] h6,
+.theme-transitioning[data-shimmer-variant] a,
+.theme-transitioning[data-shimmer-variant] button,
+.theme-transitioning[data-shimmer-variant] label,
+.theme-transitioning[data-shimmer-variant] input[type="text"],
+.theme-transitioning[data-shimmer-variant] input[type="tel"],
+.theme-transitioning[data-shimmer-variant] input[type="number"],
+.theme-transitioning[data-shimmer-variant] textarea,
+.theme-transitioning[data-shimmer-variant] li,
+.theme-transitioning[data-shimmer-variant] td,
+.theme-transitioning[data-shimmer-variant] th {
+  background: var(--gradient-direction, linear-gradient(90deg, currentColor 0%, currentColor 20%, #8b5cf6 30%, #3b82f6 40%, #8b5cf6 50%, currentColor 60%, currentColor 100%));
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 2s ease-in-out;
+  color: transparent;
+}
+
+/* Ensure buttons and links with backgrounds still show shimmer on text */
+.theme-transitioning[data-shimmer-variant] button[class*="bg-brand"],
+.theme-transitioning[data-shimmer-variant] button[class*="bg-slate-900"],
+.theme-transitioning[data-shimmer-variant] button[class*="bg-emerald"],
+.theme-transitioning[data-shimmer-variant] a[class*="bg-"] {
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 2s ease-in-out;
+  color: transparent;
+}
+
+/* Input placeholder text shimmer */
+.theme-transitioning[data-shimmer-variant] input::placeholder,
+.theme-transitioning[data-shimmer-variant] textarea::placeholder {
+  background: var(--gradient-direction, linear-gradient(90deg, currentColor 0%, currentColor 20%, #8b5cf6 30%, #3b82f6 40%, #8b5cf6 50%, currentColor 60%, currentColor 100%));
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 2s ease-in-out;
+  color: transparent;
+}
+
+/* Preserve original colors for non-text elements only */
+.theme-transitioning svg,
+.theme-transitioning img {
+  background-clip: border-box !important;
+  -webkit-background-clip: border-box !important;
+  -webkit-text-fill-color: initial !important;
+  color: initial !important;
+  animation: none !important;
+}
+
+
+/* Ensure text remains readable during transition */
+.theme-transitioning *::selection {
+  background: rgba(139, 92, 246, 0.3);
+  -webkit-text-fill-color: currentColor;
 }
 
 /* Ensure modals and overlays don't inherit body color incorrectly */
