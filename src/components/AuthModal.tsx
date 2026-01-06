@@ -231,6 +231,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: trimmedCode }),
+        credentials: "include", // Ensure cookies are sent and received
       });
 
       if (!res.ok) {
@@ -241,18 +242,40 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       }
 
       const data = await res.json();
-      console.log("Auth success:", data);
+      console.log("[AuthModal] Login success, response data:", data);
 
       // Успешная авторизация
+      // Cookie устанавливается автоматически через Set-Cookie заголовок
+      // Небольшая задержка, чтобы убедиться, что cookie доступен в браузере
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       // Вызываем callback для обновления состояния пользователя
       if (onSuccess) {
-        onSuccess();
+        console.log("[AuthModal] Calling onSuccess callback");
+        try {
+          // onSuccess может быть async, поэтому оборачиваем в Promise
+          const result = onSuccess();
+          if (result instanceof Promise) {
+            await result;
+            console.log("[AuthModal] onSuccess completed");
+          } else {
+            console.log("[AuthModal] onSuccess completed (sync)");
+          }
+        } catch (err) {
+          console.error("[AuthModal] Error in onSuccess callback:", err);
+          // Не прерываем процесс, но логируем ошибку
+        }
       } else {
         // Если callback не передан, перезагружаем страницу
+        console.log("[AuthModal] No onSuccess callback, reloading page");
         if (typeof window !== "undefined") {
           window.location.reload();
+          return; // Не закрываем модалку, т.к. страница перезагрузится
         }
       }
+      
+      // Закрываем модалку только после успешного обновления состояния
+      console.log("[AuthModal] Closing modal");
       closeModal();
     } catch (e) {
       console.error("Auth error:", e);

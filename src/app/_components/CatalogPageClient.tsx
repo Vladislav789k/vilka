@@ -647,7 +647,9 @@ function CatalogUI({
   useEffect(() => {
     const loadUser = async () => {
       try {
-        const res = await fetch("/api/auth/me");
+        const res = await fetch("/api/auth/me", {
+          credentials: "include", // Ensure cookies are sent
+        });
         if (res.ok) {
           const data = await res.json();
           setUser(data.user);
@@ -782,9 +784,9 @@ function CatalogUI({
                     </button>
 
                     {isProfileDropdownOpen && (
-                      <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-border bg-card shadow-lg dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+                      <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-slate-300 bg-slate-800 shadow-lg dark:border-white/20 dark:bg-slate-800">
                         <div className="p-2">
-                          <div className="px-3 py-2 text-xs text-foreground-muted">
+                          <div className="px-3 py-2 text-xs text-white">
                             {user.phone.startsWith("tg:")
                               ? user.telegram?.username
                                 ? `@${user.telegram.username}`
@@ -801,7 +803,7 @@ function CatalogUI({
                               e.stopPropagation();
                               window.location.assign("/api/auth/logout");
                             }}
-                            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-foreground hover:bg-hover dark:hover:bg-white/20"
+                            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-white hover:bg-white/20"
                           >
                             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -927,9 +929,9 @@ function CatalogUI({
                 </button>
 
                 {isProfileDropdownOpen && (
-                  <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-border bg-card shadow-lg dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+                  <div className="absolute right-0 z-50 mt-2 w-48 rounded-2xl border border-slate-300 bg-slate-800 shadow-lg dark:border-white/20 dark:bg-slate-800">
                     <div className="p-2">
-                      <div className="px-3 py-2 text-xs text-foreground-muted">
+                      <div className="px-3 py-2 text-xs text-white">
                         {user.phone.startsWith("tg:")
                           ? user.telegram?.username
                             ? `@${user.telegram.username}`
@@ -945,7 +947,7 @@ function CatalogUI({
                           e.stopPropagation();
                           window.location.assign("/api/auth/logout");
                         }}
-                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-foreground hover:bg-hover"
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-white hover:bg-white/20"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -1611,30 +1613,42 @@ function CatalogUI({
           setIsAuthOpen(false);
           setPendingAddOfferId(null);
         }}
-        onSuccess={() => {
-          void (async () => {
-            // После успешного входа загружаем информацию о пользователе
-            try {
-              const res = await fetch("/api/auth/me");
-              const data = await res.json().catch(() => ({}));
-              setUser((data as any).user ?? null);
+        onSuccess={async () => {
+          // После успешного входа загружаем информацию о пользователе
+          console.log("[CatalogUI] onSuccess called, fetching user data");
+          try {
+            // Небольшая задержка для гарантии, что cookie установлен
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            
+            const res = await fetch("/api/auth/me", {
+              credentials: "include", // Ensure cookies are sent
+            });
+            console.log("[CatalogUI] /api/auth/me response status:", res.status);
+            
+            const data = await res.json().catch(() => ({}));
+            console.log("[CatalogUI] /api/auth/me response data:", data);
+            
+            if (data.user) {
+              console.log("[CatalogUI] Setting user:", data.user);
+              setUser(data.user);
 
               // IMPORTANT: подтягиваем серверную корзину под новым auth (иначе пустая локальная может затереть user-cart)
+              console.log("[CatalogUI] Reloading cart");
               await reloadCart();
 
-              if ((data as any).user && pendingAddOfferId != null) {
+              if (pendingAddOfferId != null) {
+                console.log("[CatalogUI] Adding pending offer:", pendingAddOfferId);
                 add(pendingAddOfferId);
                 setPendingAddOfferId(null);
                 setIsAuthOpen(false);
               }
-            } catch (err) {
-              if (process.env.NODE_ENV === "development") {
-                console.debug("[CatalogUI] Failed to load user after auth:", err);
-              }
+            } else {
+              console.warn("[CatalogUI] No user in response, user might not be logged in");
             }
-          })().catch(() => {
-            // Silently ignore unhandled promise rejections
-          });
+          } catch (err) {
+            console.error("[CatalogUI] Failed to load user after auth:", err);
+            // Не выбрасываем ошибку, чтобы модалка закрылась
+          }
         }}
       />
       <AddressModal

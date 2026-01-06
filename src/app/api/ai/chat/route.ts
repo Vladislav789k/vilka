@@ -27,7 +27,19 @@ function safeJsonParse(input: string): any | null {
     const jsonMatch = input.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || input.match(/(\{[\s\S]*\})/);
     if (jsonMatch) {
       try {
-        return JSON.parse(jsonMatch[1]);
+        let jsonStr = jsonMatch[1];
+        // Try to fix truncated JSON (common issue)
+        if (!jsonStr.trim().endsWith('}')) {
+          // If it looks like it was cut off, try to close it
+          if (jsonStr.includes('"answer"') && jsonStr.includes('"type"')) {
+            // Find the last complete quote and close the JSON
+            const lastQuote = jsonStr.lastIndexOf('"');
+            if (lastQuote > 0) {
+              jsonStr = jsonStr.substring(0, lastQuote + 1) + '}';
+            }
+          }
+        }
+        return JSON.parse(jsonStr);
       } catch {
         // Ignore
       }
@@ -43,53 +55,38 @@ function getUserIdFromCookie(req: NextRequest): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-const SYSTEM_PROMPT = `
-Ты — чат-бот ассистент для пользователей сервиса доставки еды «Вилка».
-Ты умеешь отвечать на вопросы про корзину, адреса доставки и блюда. Для персональных данных ты можешь использовать инструменты (только чтение).
+const SYSTEM_PROMPT = `Ты — чат-бот для доставки еды «Вилка». Отвечай на вопросы про корзину, адреса и блюда.
 
-КРИТИЧЕСКИ ВАЖНО:
-- НИКОГДА не выдумывай данные! Если не знаешь ответа — используй инструменты.
-- НИКОГДА не отвечай на вопросы о ценах/скидках без вызова инструментов.
-- ВСЕГДА используй фактические данные из результатов инструментов, не придумывай.
+КРИТИЧНО:
+- НЕ выдумывай данные — используй инструменты.
+- НЕ отвечай о ценах без инструментов.
+- НЕ говори "нет данных о поиске X" — ВСЕГДА вызывай search_menu_items для запросов о еде.
+- ВАЖНО: Возвращай ТОЛЬКО валидный JSON, без текста до/после, без markdown. Только чистый JSON объект.
 
-Правила:
-- Если пользователь не авторизован, ты НЕ можешь видеть его корзину/адреса — попроси войти.
-- Никаких действий, меняющих данные (ни в БД, ни в Redis).
-- Если данных не хватает — сначала вызови инструменты, затем ответь на основе РЕАЛЬНЫХ данных.
-- ВАЖНО: Возвращай ТОЛЬКО валидный JSON без markdown, без объяснений, без дополнительного текста. Только чистый JSON объект.
-- Когда получаешь результаты инструментов, внимательно проверь поле "ok": если ok=true, значит данные получены успешно (даже если массив пустой). Если ok=false, значит произошла ошибка.
-- ВСЕГДА используй фактические данные из tool results. Если tool вернул ok=true и data, используй ТОЛЬКО эти данные.
+ПРАВИЛА ДЛЯ ЕДЫ:
+- Одно слово/фраза (1-3 слова) про еду → ВСЕГДА search_menu_items.
+- Примеры: "пицца", "шаурма", "вок", "суши", "кофе", "хочу пиццу", "есть вок?".
+- НЕ жди "покажи" — если про еду, сразу ищи.
+- Результаты: 1 элемент → покажи с ценой; 2-5 → список с ценами + "Уточнить?"; >5 → топ 5 + "Уточнить?"; пусто → "Не нашёл по «X». Уточните запрос."
+- Держи ответы короткими (до 200 символов), особенно списки.
 
-Формат ответа (строго один из):
-
-1) Запрос инструментов:
-{"type":"tool_calls","calls":[{"tool":"my_profile","args":{}}]}
-
-2) Финальный ответ пользователю:
-{"type":"final","answer":"Твой ответ здесь"}
+Формат ответа (строго один из, только JSON):
+1) {"type":"tool_calls","calls":[{"tool":"search_menu_items","args":{"queryText":"пицца","limit":10}}]}
+2) {"type":"final","answer":"..."}
 
 Инструменты:
-- my_profile: профиль пользователя (требует авторизации)
-- my_addresses: список адресов пользователя (требует авторизации, возвращает массив addresses)
-- my_cart: корзина пользователя (не требует авторизации, работает через cartToken, возвращает объект cart с полями items, totals)
-- search_menu_items: поиск блюд по названию (args: {queryText: "название", limit: 10})
-- get_menu_items_by_price: получить блюда отсортированные по цене/скидке (args: {sortBy: "cheapest"|"most_expensive"|"biggest_discount"|"smallest_discount", limit: 10})
+- search_menu_items: поиск блюд (args: {queryText, limit:10}) — для ВСЕХ запросов о еде
+- get_menu_items_by_price: сортировка по цене (args: {sortBy:"cheapest"|"most_expensive"|"biggest_discount", limit:10})
+- my_cart: корзина (args: {})
+- my_addresses: адреса (args: {}, требует авторизации)
+- my_profile: профиль (args: {}, требует авторизации)
 
-Примеры использования инструментов:
-- "какой товар самый дорогой?" → {"type":"tool_calls","calls":[{"tool":"get_menu_items_by_price","args":{"sortBy":"most_expensive","limit":1}}]}
-- "какой товар самый дешёвый?" → {"type":"tool_calls","calls":[{"tool":"get_menu_items_by_price","args":{"sortBy":"cheapest","limit":1}}]}
-- "какой товар имеет наибольшую скидку?" → {"type":"tool_calls","calls":[{"tool":"get_menu_items_by_price","args":{"sortBy":"biggest_discount","limit":1}}]}
-- "Что в корзине?" → {"type":"tool_calls","calls":[{"tool":"my_cart","args":{}}]}
-- "Какой мой адрес?" → {"type":"tool_calls","calls":[{"tool":"my_addresses","args":{}}]}
-
-Примеры обработки результатов инструментов:
-- get_menu_items_by_price вернул ok=true, data.items=[{name:"Пицца", price:600, discount_percent:10, final_price:540}] → {"type":"final","answer":"Самое дорогое блюдо: Пицца за 540 рублей (скидка 10%, было 600 рублей)"}
-- my_cart вернул ok=true, data.cart.items=[{name:"Вок", quantity:1, price:458}] → {"type":"final","answer":"В вашей корзине 1 блюдо: Вок (458 руб) x 1. Итого: 458 рублей"}
-- my_cart вернул ok=true, data.cart.items=[] → {"type":"final","answer":"Ваша корзина пуста"}
-- my_addresses вернул ok=true, data.addresses=[{address_line:"ул. Ленина, 1", city:"Москва"}] → {"type":"final","answer":"Ваш адрес: ул. Ленина, 1, Москва"}
-- my_addresses вернул ok=true, data.addresses=[] → {"type":"final","answer":"У вас пока нет сохраненных адресов. Добавьте адрес в настройках профиля."}
-- my_addresses вернул ok=false, error="auth_required" → {"type":"final","answer":"Для просмотра адресов необходимо войти в аккаунт."}
-`.trim();
+Примеры (строго следуй формату):
+"пицца" → {"type":"tool_calls","calls":[{"tool":"search_menu_items","args":{"queryText":"пицца","limit":10}}]}
+"что в корзине?" → {"type":"tool_calls","calls":[{"tool":"my_cart","args":{}}]}
+search вернул items=[{name:"Пицца",price:450}] → {"type":"final","answer":"Нашёл: Пицца за 450₽"}
+search вернул items=[{name:"Пицца",price:450},{name:"Пицца Пепперони",price:550}] → {"type":"final","answer":"Нашёл: Пицца за 450₽, Пицца Пепперони за 550₽. Уточнить?"}
+search вернул items=[] → {"type":"final","answer":"Не нашёл по «пицца». Уточните запрос."}`.trim();
 
 async function runToolCall(call: ToolCall, ctx: { userId: number | null; cartIdentity: any }) {
   switch (call.tool) {
@@ -186,10 +183,10 @@ export async function POST(req: NextRequest) {
           );
         }
         
-        // Add a stronger hint
+        // Add a stronger hint with examples
         messages.push({
           role: "user",
-          content: "Ошибка: ответ должен быть ТОЛЬКО валидным JSON без markdown. Пример: {\"type\":\"final\",\"answer\":\"Привет!\"}",
+          content: "Ошибка: ответ должен быть ТОЛЬКО валидным JSON без markdown, без текста до/после. Примеры:\n{\"type\":\"final\",\"answer\":\"Привет!\"}\n{\"type\":\"tool_calls\",\"calls\":[{\"tool\":\"search_menu_items\",\"args\":{\"queryText\":\"пицца\",\"limit\":10}}]}\n\nВерни ТОЛЬКО JSON, ничего больше.",
         });
         continue;
       }
@@ -232,7 +229,34 @@ export async function POST(req: NextRequest) {
         console.log(`[POST /api/ai/chat] Tool results at step ${step}:`, JSON.stringify(results, null, 2));
       }
       
-      messages.push({ role: "tool", content: JSON.stringify({ results }) });
+      // Format tool results more compactly to reduce token usage and prevent truncation
+      const compactResults = results.map(r => {
+        if (!r.result.ok) {
+          return { tool: r.tool, ok: false, error: r.result.error };
+        }
+        // For search results, limit items to top 5 to keep response short
+        if (r.tool === "search_menu_items" && r.result.data?.items) {
+          const items = Array.isArray(r.result.data.items) ? r.result.data.items.slice(0, 5) : [];
+          return {
+            tool: r.tool,
+            ok: true,
+            data: { items: items.map((item: any) => ({
+              id: item.id,
+              name: item.name,
+              price: parseFloat(item.price) || 0,
+              discount_percent: item.discount_percent ? parseFloat(item.discount_percent) : null,
+              final_price: item.final_price ? parseFloat(item.final_price) : null,
+            })) },
+          };
+        }
+        return {
+          tool: r.tool,
+          ok: true,
+          data: r.result.data || {},
+        };
+      });
+      
+      messages.push({ role: "tool", content: JSON.stringify({ results: compactResults }) });
     }
 
     return NextResponse.json(

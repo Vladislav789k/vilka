@@ -58,17 +58,54 @@ export async function toolSearchMenuItems(args: { queryText: string; limit?: num
   const q = (args.queryText ?? "").trim();
   if (!q) return { ok: false, error: "queryText is required" };
   const limit = Math.min(Math.max(args.limit ?? 10, 1), 20);
+  
   try {
+    // Use the same search logic as the /api/search endpoint for better results
+    // Normalize the query (lowercase, trim, handle Cyrillic)
+    const normalizedQuery = q.toLowerCase().trim();
+    
+    // Build a more flexible search query that handles:
+    // 1. Exact matches (highest priority)
+    // 2. Prefix matches
+    // 3. Substring matches
+    // 4. Case-insensitive matches
+    
     const { rows } = await query(
-      `SELECT id, name, price, discount_percent, image_url, stock_qty, is_available, is_active
+      `SELECT 
+         id, 
+         name, 
+         price, 
+         discount_percent,
+         (price * (1 - COALESCE(discount_percent, 0) / 100.0)) as final_price,
+         image_url, 
+         stock_qty, 
+         is_available, 
+         is_active,
+         CASE
+           WHEN LOWER(name) = LOWER($1) THEN 1
+           WHEN LOWER(name) LIKE LOWER($1 || '%') THEN 2
+           WHEN LOWER(name) LIKE LOWER('%' || $1 || '%') THEN 3
+           ELSE 4
+         END as match_priority
        FROM menu_items
-       WHERE LOWER(name) LIKE LOWER($1) AND is_active = TRUE
-       ORDER BY is_active DESC, is_available DESC, created_at DESC
+       WHERE is_active = TRUE
+         AND (
+           LOWER(name) = LOWER($1)
+           OR LOWER(name) LIKE LOWER($1 || '%')
+           OR LOWER(name) LIKE LOWER('%' || $1 || '%')
+         )
+       ORDER BY 
+         match_priority ASC,
+         is_available DESC,
+         final_price ASC,
+         name ASC
        LIMIT ${limit}`,
-      [`%${q}%`]
+      [normalizedQuery]
     );
+    
     return { ok: true, data: { items: rows } };
   } catch (e: any) {
+    console.error("[toolSearchMenuItems] Error:", e);
     return { ok: false, error: String(e?.message ?? e) };
   }
 }

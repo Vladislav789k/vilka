@@ -22,7 +22,7 @@ export async function ollamaChat(messages: OllamaMessage[]) {
   const model = getOllamaModel();
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout (model can be slow)
 
   try {
     const res = await fetch(`${baseUrl}/api/chat`, {
@@ -33,8 +33,8 @@ export async function ollamaChat(messages: OllamaMessage[]) {
         model,
         stream: false,
         messages,
-        // Reduce context to lower memory pressure (can be overridden later if needed)
-        options: { num_ctx: 2048 },
+        // Increase context to handle longer prompts (but keep reasonable for 3B model)
+        options: { num_ctx: 4096 },
       }),
     });
 
