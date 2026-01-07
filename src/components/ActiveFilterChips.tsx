@@ -60,7 +60,7 @@ export function ActiveFilterChips({
           key={`${filter.key}-${index}`}
           type="button"
           onClick={() => onRemoveFilter(filter.key, filter.value)}
-          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-hover dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+          className="inline-flex items-center gap-1.5 rounded-full glass glass-subtle px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-hover dark:hover:bg-white/20"
         >
           <span>{filter.label}</span>
           <X className="h-3 w-3" />

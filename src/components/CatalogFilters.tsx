@@ -110,7 +110,7 @@ export function CatalogFilters({
         ref={buttonRef}
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+        className="inline-flex items-center gap-2 rounded-full glass glass-subtle px-3 py-1.5 text-xs font-medium text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-white/20"
       >
         <Filter className="h-3.5 w-3.5" />
         <span>Фильтры</span>

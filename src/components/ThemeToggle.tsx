@@ -15,8 +15,22 @@ export function ThemeToggle() {
 
   // Shared function to trigger shimmer effect with random color variant
   const triggerShimmerEffect = () => {
+    // Find the app shell wrapper
+    const appShell = document.getElementById("app-shell");
+    if (!appShell) {
+      // Safe guard: if wrapper not found, do nothing (no crash)
+      return;
+    }
+
     // Prevent multiple simultaneous triggers
-    if (document.body.classList.contains("theme-transitioning")) {
+    if (appShell.classList.contains("theme-transitioning")) {
+      return;
+    }
+
+    // Check for reduced motion preference
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReducedMotion) {
+      // Skip animation for users who prefer reduced motion
       return;
     }
 
@@ -42,21 +56,21 @@ export function ThemeToggle() {
       gradient = `linear-gradient(90deg, currentColor 0%, currentColor 20%, ${palette.start} 30%, ${palette.mid} 40%, ${palette.start} 50%, currentColor 60%, currentColor 100%)`;
     }
     
-    // Trigger transition effect
-    document.body.classList.add("theme-transitioning");
-    document.documentElement.classList.add("theme-transitioning");
-    document.body.setAttribute("data-shimmer-variant", randomColorVariant);
-    document.documentElement.setAttribute("data-shimmer-variant", randomColorVariant);
-    document.documentElement.style.setProperty("--gradient-direction", gradient);
+    // Trigger transition effect on the wrapper only
+    appShell.classList.add("theme-transitioning");
+    appShell.setAttribute("data-shimmer-variant", randomColorVariant);
+    appShell.style.setProperty("--gradient-direction", gradient);
     
-    // Remove transition class after animation completes
+    // Set will-change for performance during animation
+    appShell.style.willChange = "background-position";
+    
+    // Remove transition class after animation completes (2s animation + 100ms buffer)
     setTimeout(() => {
-      document.body.classList.remove("theme-transitioning");
-      document.documentElement.classList.remove("theme-transitioning");
-      document.body.removeAttribute("data-shimmer-variant");
-      document.documentElement.removeAttribute("data-shimmer-variant");
-      document.documentElement.style.removeProperty("--gradient-direction");
-    }, 2000);
+      appShell.classList.remove("theme-transitioning");
+      appShell.removeAttribute("data-shimmer-variant");
+      appShell.style.removeProperty("--gradient-direction");
+      appShell.style.willChange = "auto";
+    }, 2100);
   };
 
   if (!mounted) {

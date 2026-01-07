@@ -6,6 +6,7 @@ import type { PropsWithChildren } from "react";
 import { buildCartEntries, calculateTotals, updateCartQuantity } from "./cartMath";
 import type { CartState, CartEntry, CartTotals } from "./types";
 import type { Offer, OfferId } from "../catalog/types";
+import { apiClient, devLog, devError, devWarn } from "@/lib/apiClient";
 
 type CartContextValue = {
   cart: CartState;
@@ -33,11 +34,8 @@ export function CartProvider({ offers, children }: CartProviderProps) {
   const didWarnNetworkErrorRef = useRef(false);
 
   const loadCartFromServer = useRef(
-    async (opts?: { mergeIfHasExisting?: boolean; retryCount?: number }) => {
+    async (opts?: { mergeIfHasExisting?: boolean }) => {
       const mergeIfHasExisting = opts?.mergeIfHasExisting ?? false;
-      const retryCount = opts?.retryCount ?? 0;
-      const MAX_RETRIES = 3;
-      const RETRY_DELAYS = [300, 500, 800]; // ms
 
       // Skip if not in browser
       if (typeof window === "undefined") {
@@ -47,96 +45,51 @@ export function CartProvider({ offers, children }: CartProviderProps) {
 
       setIsLoading(true);
       try {
-        const apiUrl = "/api/cart/load";
-        const fullUrl = typeof window !== "undefined" 
-          ? `${window.location.origin}${apiUrl}`
-          : apiUrl;
-        
-        if (process.env.NODE_ENV === "development" && retryCount === 0) {
-          console.log(`[CartProvider] Loading cart from: ${fullUrl}`);
-        }
-        
-        const res = await fetch(apiUrl, { method: "GET" }).catch((fetchError) => {
-          // Network error - retry if we haven't exceeded max retries
-          if (retryCount < MAX_RETRIES) {
-            const delay = RETRY_DELAYS[retryCount] || 800;
-            if (process.env.NODE_ENV === "development") {
-              console.log(
-                `[CartProvider] Network error loading cart, retrying (${retryCount + 1}/${MAX_RETRIES}) after ${delay}ms...`
-              );
-            }
-            setTimeout(() => {
-              loadCartFromServer.current({ mergeIfHasExisting, retryCount: retryCount + 1 });
-            }, delay);
-            return null;
+        const data = await apiClient.get<{ items?: Array<{ offerId: number; quantity: number }> }>(
+          "/api/cart/load",
+          {
+            retry: {
+              maxRetries: 3,
+              retryDelays: [300, 500, 800],
+            },
           }
-          
-          // After max retries, log warning once
+        );
+
+        devLog("Cart loaded from server", { itemsCount: data.items?.length || 0 });
+
+        const quantities: CartState = {};
+        if (data.items && Array.isArray(data.items)) {
+          for (const item of data.items) {
+            const stringId = String(item.offerId);
+            quantities[stringId] = item.quantity;
+          }
+        }
+
+        if (mergeIfHasExisting) {
+          setCart((prev) => {
+            const hasExistingItems = Object.values(prev).some((qty) => qty > 0);
+            if (hasExistingItems) {
+              return { ...prev, ...quantities };
+            }
+            return quantities;
+          });
+        } else {
+          // IMPORTANT: replace state (used after auth changes) to avoid syncing stale/empty cart over user cart
+          setCart(quantities);
+        }
+
+        // Reset warning flag on success
+        didWarnNetworkErrorRef.current = false;
+      } catch (err) {
+        // Handle errors gracefully - apiClient already retried
+        if (err instanceof TypeError && err.message === "Failed to fetch") {
+          // Only warn once per page load
           if (!didWarnNetworkErrorRef.current) {
             didWarnNetworkErrorRef.current = true;
-            if (process.env.NODE_ENV === "development") {
-              console.warn(
-                `[CartProvider] Network error loading cart (${fullUrl}) after ${MAX_RETRIES} retries. ` +
-                `Continuing with empty cart. This is normal during app startup.`
-              );
-            }
+            devWarn("Network error loading cart - continuing with empty cart");
           }
-          return null;
-        });
-        
-        // If fetch failed (network error), gracefully degrade
-        if (!res) {
-          setIsLoading(false);
-          return;
-        }
-
-        if (res.ok) {
-          const data = await res.json();
-          
-          if (process.env.NODE_ENV === "development") {
-            console.log("[CartProvider] Cart loaded from server", { itemsCount: data.items?.length || 0 });
-          }
-
-          const quantities: CartState = {};
-          if (data.items && Array.isArray(data.items)) {
-            for (const item of data.items) {
-              const stringId = String(item.offerId);
-              quantities[stringId] = item.quantity;
-            }
-          }
-
-          if (mergeIfHasExisting) {
-            setCart((prev) => {
-              const hasExistingItems = Object.values(prev).some((qty) => qty > 0);
-              if (hasExistingItems) {
-                return { ...prev, ...quantities };
-              }
-              return quantities;
-            });
-          } else {
-            // IMPORTANT: replace state (used after auth changes) to avoid syncing stale/empty cart over user cart
-            setCart(quantities);
-          }
-          
-          // Reset warning flag on success
-          didWarnNetworkErrorRef.current = false;
         } else {
-          if (process.env.NODE_ENV === "development") {
-            console.error(`[CartProvider] Failed to load cart: ${res.status}`);
-          }
-        }
-      } catch (err) {
-        // Handle errors gracefully - don't spam console
-        if (process.env.NODE_ENV === "development") {
-          if (err instanceof TypeError && err.message === "Failed to fetch") {
-            // Only warn once per page load
-            if (!didWarnNetworkErrorRef.current) {
-              didWarnNetworkErrorRef.current = true;
-              console.warn("[CartProvider] Network error loading cart - continuing with empty cart");
-            }
-          } else {
-            console.error("[CartProvider] Error loading cart:", err);
-          }
+          devError("Error loading cart:", err);
         }
       } finally {
         setIsLoading(false);
@@ -151,12 +104,12 @@ export function CartProvider({ offers, children }: CartProviderProps) {
     loadCartFromServer.current({ mergeIfHasExisting: true });
   }, []);
 
-  const syncWithServer = useRef(async (quantities: CartState, retryCount = 0) => {
+  const syncWithServer = useRef(async (quantities: CartState) => {
     // Skip sync if we're not in the browser
     if (typeof window === "undefined") {
       return;
     }
-    
+
     const items = Object.entries(quantities)
       .filter(([_, qty]) => qty > 0)
       .map(([offerId, quantity]) => {
@@ -172,55 +125,34 @@ export function CartProvider({ offers, children }: CartProviderProps) {
       return;
     }
 
-    // Build the API URL (relative for Next.js API routes)
-    const apiUrl = "/api/cart/validate";
-    const fullUrl = typeof window !== "undefined" 
-      ? `${window.location.origin}${apiUrl}`
-      : apiUrl;
-    
-    const MAX_RETRIES = 3;
-    const RETRY_DELAYS = [300, 500, 800]; // ms
-    
-    // Debug log in development only (once per sync attempt)
-    if (process.env.NODE_ENV === "development" && retryCount === 0) {
-      console.log(`[CartProvider] Syncing cart to: ${fullUrl}`, { itemsCount: items.length });
-    }
+    devLog("Syncing cart", { itemsCount: items.length });
 
     try {
-      const res = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await apiClient.post<{
+        items?: Array<{ offerId: number; quantity: number }>;
+        changes?: any[];
+        stockByOfferId?: Record<number, number>;
+      }>("/api/cart/validate", {
+        body: {
           deliverySlot: null,
           items,
-        }),
+        },
+        retry: {
+          maxRetries: 3,
+          retryDelays: [300, 500, 800],
+        },
       });
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        if (process.env.NODE_ENV === "development") {
-          console.error(`[CartProvider] Cart sync failed (${res.status}):`, errorData);
-        }
-        // Не обновляем состояние при ошибке
-        return;
-      }
-      
-      const data = await res.json();
-      
-      if (process.env.NODE_ENV === "development") {
-        console.log("[CartProvider] Cart synced successfully", { itemsCount: data.items?.length || 0 });
-      }
-      
+      devLog("Cart synced successfully", { itemsCount: data.items?.length || 0 });
+
       // Reset warning flag on success
       didWarnNetworkErrorRef.current = false;
-      
+
       // Проверяем, есть ли изменения (удаленные товары)
       if (data.changes && Array.isArray(data.changes) && data.changes.length > 0) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[CartProvider] Items were removed:", data.changes);
-        }
+        devWarn("Items were removed:", data.changes);
       }
-      
+
       // Обновляем локальное состояние из ответа сервера
       // Важно: сервер возвращает числовые offerId, но в CartState ключи - строки
       const serverQuantities: CartState = {};
@@ -246,38 +178,19 @@ export function CartProvider({ offers, children }: CartProviderProps) {
       // Обновляем корзину из ответа сервера (это важно для синхронизации с другими вкладками/устройствами)
       setCart(serverQuantities);
     } catch (err) {
-      // Handle network errors gracefully with retry logic
+      // Handle errors gracefully - apiClient already retried
       if (err instanceof TypeError && err.message === "Failed to fetch") {
-        // Retry if we haven't exceeded max retries
-        if (retryCount < MAX_RETRIES) {
-          const delay = RETRY_DELAYS[retryCount] || 800;
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              `[CartProvider] Network error, retrying (${retryCount + 1}/${MAX_RETRIES}) after ${delay}ms...`
-            );
-          }
-          setTimeout(() => {
-            syncWithServer.current(quantities, retryCount + 1);
-          }, delay);
-          return;
-        }
-        
         // After max retries, log warning once per page load
         if (!didWarnNetworkErrorRef.current) {
           didWarnNetworkErrorRef.current = true;
-          if (process.env.NODE_ENV === "development") {
-            console.warn(
-              `[CartProvider] Network error during cart sync (${fullUrl}) after ${MAX_RETRIES} retries. ` +
-              `Continuing with local cart state. This is normal during app startup.`
-            );
-          }
+          devWarn(
+            "Network error during cart sync after retries. Continuing with local cart state. This is normal during app startup."
+          );
         }
         return;
       }
       // Other errors - log in dev mode
-      if (process.env.NODE_ENV === "development") {
-        console.error("[CartProvider] Error syncing cart:", err);
-      }
+      devError("Error syncing cart:", err);
     }
   });
 

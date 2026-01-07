@@ -92,7 +92,7 @@ export default function RootLayout({
           storageKey="theme"
           themes={["light", "dark"]}
         >
-          <div className="flex min-h-screen w-full flex-col bg-transparent">
+          <div id="app-shell" className="flex min-h-screen w-full flex-col bg-transparent">
             {children}
           </div>
         </ThemeProvider>

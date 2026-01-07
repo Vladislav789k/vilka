@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { ShoppingBag, MapPin, User, Search, Clock, ChevronRight, MessageCircle, MoreVertical } from "lucide-react";
 
 import AuthModal from "@/components/AuthModal";
@@ -21,6 +22,9 @@ import { buildCatalogIndexes } from "@/modules/catalog/indexes";
 import { ensureValidSelection, type Selection } from "@/modules/catalog/selection";
 import type { BaseItemId, CatalogData, CategoryId, SubcategoryId } from "@/modules/catalog/types";
 import { queryStringToFilters, updateURLFilters } from "@/lib/filterUtils";
+import { CategoryEmoji } from "@/components/CategoryEmoji";
+import { devLog, devError } from "@/lib/apiClient";
+import { apiClient } from "@/lib/apiClient";
 
 type CatalogPageClientProps = {
   catalog: CatalogData;
@@ -42,34 +46,7 @@ function getInitialSelection(catalog: CatalogData): Selection {
   };
 }
 
-function CategoryEmoji({ code }: { code: string }) {
-  const emoji = code.startsWith("bakery")
-    ? "🥐"
-    : code.startsWith("breakfasts")
-    ? "🍳"
-    : code.startsWith("snacks")
-    ? "🥨"
-    : code.startsWith("salads")
-    ? "🥗"
-    : code.startsWith("soups")
-    ? "🥣"
-    : code.startsWith("pizza")
-    ? "🍕"
-    : code.startsWith("burgers")
-    ? "🍔"
-    : code.startsWith("hot")
-    ? "🍽️"
-    : code.startsWith("pasta")
-    ? "🍝"
-    : code.startsWith("desserts")
-    ? "🍰"
-    : code.startsWith("drinks")
-    ? "🥤"
-    : code.startsWith("combos")
-    ? "🧺"
-    : "🍴";
-  return <span>{emoji}</span>;
-}
+// CategoryEmoji is now imported from shared component
 
 function CatalogUI({
   catalog,
@@ -77,19 +54,8 @@ function CatalogUI({
 }: CatalogPageClientProps & { indexes: CatalogIndexes }) {
   const { quantities, entries, totals, offerStocks, add, remove, reload: reloadCart } = useCart();
 
-  // Agent logging helper (dev-only, can be disabled via env var)
-  // Note: All agent logging is now suppressed via fetch monkey-patch in layout.tsx
-  const shouldLogAgent = () => {
-    if (process.env.NODE_ENV !== "development") return false;
-    if (process.env.NEXT_PUBLIC_DISABLE_AGENT_LOGS === "1") return false;
-    return true;
-  };
-
-  const agentLog = (data: any) => {
-    if (!shouldLogAgent()) return;
-    // Agent logging is now handled via fetch monkey-patch in layout.tsx
-    // This function is kept for compatibility but does nothing
-  };
+  // Agent logging is now handled via fetch monkey-patch in layout.tsx
+  // This section removed - no longer needed
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -146,15 +112,172 @@ function CatalogUI({
   const [pressedCardId, setPressedCardId] = useState<string | number | null>(null);
   const [pressedCardState, setPressedCardState] = useState<'down' | 'up' | null>(null);
 
-  const initial = useMemo(() => getInitialSelection(catalog), [catalog]);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  
+  // Track if selection changes are user-initiated (to prevent useEffect from overriding)
+  const isUserInitiatedChangeRef = useRef(false);
+  
+  // Initialize from URL params if present, otherwise use default
+  const urlCategoryId = searchParams.get("category");
+  const urlSubcategoryId = searchParams.get("subcategory");
+  const urlItemId = searchParams.get("item");
+  
+  // Build lookup maps for initial selection (before maps are defined)
+  const categoryByIdMapForInit = useMemo(() => {
+    const map = new Map<CategoryId, typeof catalog.categories[number]>();
+    for (const cat of catalog.categories) {
+      map.set(cat.id, cat);
+    }
+    return map;
+  }, [catalog.categories]);
+
+  const subcategoryByIdMapForInit = useMemo(() => {
+    const map = new Map<SubcategoryId, typeof catalog.subcategories[number]>();
+    for (const sub of catalog.subcategories) {
+      map.set(sub.id, sub);
+    }
+    return map;
+  }, [catalog.subcategories]);
+
+  const subcategoriesByCategoryForInit = useMemo(() => {
+    const map = new Map<CategoryId, typeof catalog.subcategories>();
+    for (const sub of catalog.subcategories) {
+      const list = map.get(sub.categoryId) ?? [];
+      map.set(sub.categoryId, [...list, sub]);
+    }
+    return map;
+  }, [catalog.subcategories]);
+
+  const baseItemByIdMapForInit = useMemo(() => {
+    const map = new Map<BaseItemId, typeof catalog.baseItems[number]>();
+    for (const item of catalog.baseItems) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [catalog.baseItems]);
+
+  const initial = useMemo(() => {
+    if (urlCategoryId) {
+      const category = categoryByIdMapForInit.get(urlCategoryId);
+      if (category) {
+        const subcategory = urlSubcategoryId
+          ? subcategoryByIdMapForInit.get(urlSubcategoryId)
+          : subcategoriesByCategoryForInit.get(urlCategoryId)?.[0];
+        const item = urlItemId
+          ? baseItemByIdMapForInit.get(urlItemId)
+          : null;
+        // If item is specified, ensure it belongs to the subcategory
+        const validItem = item && subcategory && item.subcategoryId === subcategory.id ? item : null;
+        return {
+          categoryId: urlCategoryId,
+          subcategoryId: subcategory?.id ?? null,
+          itemId: validItem?.id ?? null,
+        };
+      }
+    }
+    return getInitialSelection(catalog);
+  }, [urlCategoryId, urlSubcategoryId, urlItemId, categoryByIdMapForInit, subcategoryByIdMapForInit, subcategoriesByCategoryForInit, baseItemByIdMapForInit]);
+  
   const [activeCategoryId, setActiveCategoryId] = useState<CategoryId | null>(initial.categoryId);
   const [activeSubcategoryId, setActiveSubcategoryId] = useState<SubcategoryId | null>(initial.subcategoryId);
   const [activeItemId, setActiveItemId] = useState<BaseItemId | null>(initial.itemId);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<CategoryId[]>(
     initial.categoryId ? [initial.categoryId] : []
   );
-
+  
   const { categories, subcategories, baseItems } = catalog;
+
+  // Optimized lookup maps for O(1) access instead of O(n) find()
+  // Define these early so they can be used in useEffect dependencies
+  const offerByIdMap = useMemo(() => {
+    const map = new Map<string, typeof catalog.offers[number]>();
+    for (const offer of catalog.offers) {
+      map.set(offer.id, offer);
+    }
+    return map;
+  }, [catalog.offers]);
+
+  const baseItemByIdMap = useMemo(() => {
+    const map = new Map<BaseItemId, typeof catalog.baseItems[number]>();
+    for (const item of catalog.baseItems) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [catalog.baseItems]);
+
+  const subcategoryByIdMap = useMemo(() => {
+    const map = new Map<SubcategoryId, typeof catalog.subcategories[number]>();
+    for (const sub of catalog.subcategories) {
+      map.set(sub.id, sub);
+    }
+    return map;
+  }, [catalog.subcategories]);
+
+  const categoryByIdMap = useMemo(() => {
+    const map = new Map<CategoryId, typeof catalog.categories[number]>();
+    for (const cat of catalog.categories) {
+      map.set(cat.id, cat);
+    }
+    return map;
+  }, [catalog.categories]);
+  
+  // Update selection when URL params change (only if not user-initiated)
+  useEffect(() => {
+    if (isUserInitiatedChangeRef.current) {
+      isUserInitiatedChangeRef.current = false;
+      return;
+    }
+    if (urlCategoryId && urlCategoryId !== activeCategoryId) {
+      setActiveCategoryId(urlCategoryId);
+      if (urlSubcategoryId) {
+        setActiveSubcategoryId(urlSubcategoryId);
+      } else {
+        setActiveSubcategoryId(null);
+      }
+      if (urlItemId) {
+        const item = baseItemByIdMap.get(urlItemId);
+        if (item && item.categoryId === urlCategoryId && (!urlSubcategoryId || item.subcategoryId === urlSubcategoryId)) {
+          setActiveItemId(urlItemId);
+        } else {
+          setActiveItemId(null);
+        }
+      } else {
+        setActiveItemId(null);
+      }
+      setExpandedCategoryIds((prev) =>
+        prev.includes(urlCategoryId) ? prev : [...prev, urlCategoryId]
+      );
+    } else if (urlCategoryId === activeCategoryId) {
+      // Category matches, check if subcategory or item changed
+      if (urlSubcategoryId && urlSubcategoryId !== activeSubcategoryId) {
+        setActiveSubcategoryId(urlSubcategoryId);
+        if (urlItemId) {
+          const item = baseItemByIdMap.get(urlItemId);
+          if (item && item.subcategoryId === urlSubcategoryId) {
+            setActiveItemId(urlItemId);
+          } else {
+            setActiveItemId(null);
+          }
+        } else {
+          setActiveItemId(null);
+        }
+      } else if (!urlSubcategoryId && activeSubcategoryId) {
+        setActiveSubcategoryId(null);
+        setActiveItemId(null);
+      } else if (urlItemId && urlItemId !== activeItemId) {
+        const item = baseItemByIdMap.get(urlItemId);
+        if (item && item.categoryId === activeCategoryId && (!activeSubcategoryId || item.subcategoryId === activeSubcategoryId)) {
+          setActiveItemId(urlItemId);
+        }
+      } else if (!urlItemId && activeItemId) {
+        setActiveItemId(null);
+      }
+    } else if (!urlCategoryId && activeCategoryId) {
+      // URL cleared but state still has category - don't reset, let user keep selection
+    }
+  }, [urlCategoryId, urlSubcategoryId, urlItemId, activeCategoryId, activeSubcategoryId, activeItemId, baseItemByIdMap]);
 
   useEffect(() => {
     const next = ensureValidSelection(
@@ -207,9 +330,9 @@ function CatalogUI({
       // Handle auto-navigation from cache
       if (data.shouldAutoNavigate && results.length === 1) {
         const result = results[0];
-        const offer = catalog.offers.find((o) => o.id === String(result.id));
+        const offer = offerByIdMap.get(String(result.id));
         if (offer) {
-          const baseItem = catalog.baseItems.find((bi) => bi.id === offer.baseItemId);
+          const baseItem = baseItemByIdMap.get(offer.baseItemId);
           if (baseItem) {
             setActiveCategoryId(baseItem.categoryId);
             setActiveSubcategoryId(baseItem.subcategoryId);
@@ -240,9 +363,7 @@ function CatalogUI({
       const isDev = process.env.NODE_ENV === "development";
       const url = `/api/search?q=${encodeURIComponent(q)}&limit=10${isDev ? "&debug=true" : ""}`;
       
-      if (isDev) {
-        console.log(`[search] Fetching: ${url} (seq: ${currentSeq})`);
-      }
+      devLog(`Fetching: ${url} (seq: ${currentSeq})`);
       
       // Retry logic with backoff
       const MAX_RETRIES = 2;
@@ -251,17 +372,13 @@ function CatalogUI({
       for (let retryCount = 0; retryCount <= MAX_RETRIES; retryCount++) {
         // Check if this request is still the latest
         if (currentSeq !== searchRequestSeqRef.current) {
-          if (isDev) {
-            console.log(`[search] Request ${currentSeq} superseded, aborting`);
-          }
+        devLog(`Request ${currentSeq} superseded, aborting`);
           return;
         }
         
         // Check if aborted
         if (abortController.signal.aborted) {
-          if (isDev) {
-            console.log(`[search] Request ${currentSeq} aborted`);
-          }
+          devLog(`Request ${currentSeq} aborted`);
           return;
         }
         
@@ -292,9 +409,7 @@ function CatalogUI({
           }
           
           if (data.error) {
-            if (isDev) {
-              console.error(`[search] API error (seq ${currentSeq}):`, data.error);
-            }
+            devError(`API error (seq ${currentSeq}):`, data.error);
             // Keep previous results, just show error hint
             setSearchError("Ошибка поиска. Попробуйте ещё раз.");
             setIsSearching(false);
@@ -323,9 +438,9 @@ function CatalogUI({
           // Auto-navigate ONLY when exactly 1 confident match exists
           if (data.shouldAutoNavigate && results.length === 1) {
             const result = results[0];
-            const offer = catalog.offers.find((o) => o.id === String(result.id));
+            const offer = offerByIdMap.get(String(result.id));
             if (offer) {
-              const baseItem = catalog.baseItems.find((bi) => bi.id === offer.baseItemId);
+              const baseItem = baseItemByIdMap.get(offer.baseItemId);
               if (baseItem) {
                 setActiveCategoryId(baseItem.categoryId);
                 setActiveSubcategoryId(baseItem.subcategoryId);
@@ -339,8 +454,8 @@ function CatalogUI({
             }
           }
           
-          if (isDev && data.debug) {
-            console.log(`[search] Success (seq ${currentSeq}):`, data.debug);
+          if (data.debug) {
+            devLog(`Success (seq ${currentSeq}):`, data.debug);
           }
           
           // Success - exit retry loop
@@ -378,9 +493,7 @@ function CatalogUI({
           }
           
           // Final failure or non-network error
-          if (isDev) {
-            console.error(`[search] Fetch error (seq ${currentSeq}):`, error);
-          }
+          devError(`Fetch error (seq ${currentSeq}):`, error);
           
           // Keep previous results, show error hint
           setSearchError("Ошибка сети. Попробуйте ещё раз.");
@@ -391,9 +504,7 @@ function CatalogUI({
       }
       })().catch((err) => {
         // Silently catch any unhandled promise rejections
-        if (process.env.NODE_ENV === "development") {
-          console.debug("[search] Unhandled error in search effect:", err);
-        }
+        devError("Unhandled error in search effect:", err);
         // Keep previous results, just show error hint
         setSearchError("Ошибка поиска. Попробуйте ещё раз.");
         setIsSearching(false);
@@ -409,7 +520,7 @@ function CatalogUI({
         searchAbortControllerRef.current = null;
       }
     };
-  }, [searchQuery, catalog]);
+  }, [searchQuery, offerByIdMap, baseItemByIdMap]);
 
   // Close search results on outside click
   useEffect(() => {
@@ -476,27 +587,37 @@ function CatalogUI({
     setFilters(newFilters);
   };
 
-  // Helper functions to map menu_item_id to catalog IDs
-  const getItemId = (menuItemId: number): BaseItemId | null => {
-    const offer = catalog.offers.find((o) => o.id === String(menuItemId));
-    return offer?.baseItemId || null;
-  };
+  // Helper functions to map menu_item_id to catalog IDs (optimized with Maps)
+  const getItemId = useCallback(
+    (menuItemId: number): BaseItemId | null => {
+      const offer = offerByIdMap.get(String(menuItemId));
+      return offer?.baseItemId || null;
+    },
+    [offerByIdMap]
+  );
 
-  const getCategoryId = (menuItemId: number): CategoryId | null => {
-    const baseItemId = getItemId(menuItemId);
-    if (!baseItemId) return null;
-    const baseItem = catalog.baseItems.find((bi) => bi.id === baseItemId);
-    return baseItem?.categoryId || null;
-  };
+  const getCategoryId = useCallback(
+    (menuItemId: number): CategoryId | null => {
+      const baseItemId = getItemId(menuItemId);
+      if (!baseItemId) return null;
+      const baseItem = baseItemByIdMap.get(baseItemId);
+      return baseItem?.categoryId || null;
+    },
+    [getItemId, baseItemByIdMap]
+  );
 
-  const getSubcategoryId = (menuItemId: number): SubcategoryId | null => {
-    const baseItemId = getItemId(menuItemId);
-    if (!baseItemId) return null;
-    const baseItem = catalog.baseItems.find((bi) => bi.id === baseItemId);
-    return baseItem?.subcategoryId || null;
-  };
+  const getSubcategoryId = useCallback(
+    (menuItemId: number): SubcategoryId | null => {
+      const baseItemId = getItemId(menuItemId);
+      if (!baseItemId) return null;
+      const baseItem = baseItemByIdMap.get(baseItemId);
+      return baseItem?.subcategoryId || null;
+    },
+    [getItemId, baseItemByIdMap]
+  );
 
   const handleSearchResultSelect = (itemId: BaseItemId, categoryId: CategoryId, subcategoryId: SubcategoryId) => {
+    isUserInitiatedChangeRef.current = true;
     setActiveCategoryId(categoryId);
     setActiveSubcategoryId(subcategoryId);
     setActiveItemId(itemId);
@@ -505,6 +626,13 @@ function CatalogUI({
     );
     setIsSearchResultsOpen(false);
     setSearchQuery("");
+    
+    // Update URL
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("category", categoryId);
+    params.set("subcategory", subcategoryId);
+    params.set("item", itemId);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
   const toggleCategoryExpanded = (categoryId: CategoryId) => {
@@ -514,26 +642,42 @@ function CatalogUI({
   };
 
   const handleCategoryClick = (categoryId: CategoryId) => {
+    isUserInitiatedChangeRef.current = true;
     setActiveCategoryId(categoryId);
     // Reset deeper levels: user should explicitly choose subcategory (2nd) and item (3rd).
     setActiveSubcategoryId(null);
     setActiveItemId(null);
     toggleCategoryExpanded(categoryId);
+    
+    // Update URL
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("category", categoryId);
+    params.delete("subcategory");
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  const handleSubcategoryClick = (subcategoryId: SubcategoryId) => {
-    const sub = subcategories.find((s) => s.id === subcategoryId);
+  const handleSubcategoryClick = (subcategoryId: SubcategoryId, e?: ReactMouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    const sub = subcategoryByIdMap.get(subcategoryId);
     if (!sub) return;
 
+    isUserInitiatedChangeRef.current = true;
     setActiveCategoryId(sub.categoryId);
     setActiveSubcategoryId(sub.id);
     // 3rd level should be chosen by the user in the main content area.
     setActiveItemId(null);
     setExpandedCategoryIds((prev) => (prev.includes(sub.categoryId) ? prev : [...prev, sub.categoryId]));
+    
+    // Update URL
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("category", sub.categoryId);
+    params.set("subcategory", sub.id);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
   const handleItemClick = (itemId: BaseItemId) => {
-    const item = baseItems.find((i) => i.id === itemId);
+    const item = baseItemByIdMap.get(itemId);
     if (!item) return;
 
     setActiveCategoryId(item.categoryId);
@@ -578,9 +722,9 @@ function CatalogUI({
   const cartButtonLabel = totals.totalPrice > 0 ? `${totals.totalPrice} ₽` : "0 ₽";
   const cartCountLabel = totals.totalCount > 0 ? `${totals.totalCount}` : "0";
 
-  const currentCategory = categories.find((c) => c.id === activeCategoryId);
-  const currentSubcategory = subcategories.find((s) => s.id === activeSubcategoryId);
-  const currentItem = baseItems.find((i) => i.id === activeItemId);
+  const currentCategory = activeCategoryId ? categoryByIdMap.get(activeCategoryId) : undefined;
+  const currentSubcategory = activeSubcategoryId ? subcategoryByIdMap.get(activeSubcategoryId) : undefined;
+  const currentItem = activeItemId ? baseItemByIdMap.get(activeItemId) : undefined;
 
   const handleCategoryBreadcrumbClick = (categoryId: CategoryId) => {
     setActiveCategoryId(categoryId);
@@ -594,7 +738,7 @@ function CatalogUI({
   };
 
   const handleSubcategoryBreadcrumbClick = (subcategoryId: SubcategoryId) => {
-    const sub = subcategories.find((s) => s.id === subcategoryId);
+    const sub = subcategoryByIdMap.get(subcategoryId);
     if (!sub) return;
     setActiveCategoryId(sub.categoryId);
     setExpandedCategoryIds((prev) => (prev.includes(sub.categoryId) ? prev : [...prev, sub.categoryId]));
@@ -647,7 +791,7 @@ function CatalogUI({
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-border bg-card p-4 text-xs text-foreground-muted dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+            <div className="rounded-2xl border border-dashed glass p-4 text-xs text-foreground-muted">
               Для этой позиции пока нет анонимных предложений.
             </div>
           )}
@@ -661,7 +805,7 @@ function CatalogUI({
           </div>
 
           {branded.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border bg-card p-4 text-xs text-foreground-muted dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+            <div className="rounded-2xl border border-dashed glass p-4 text-xs text-foreground-muted">
               Пока нет брендированных предложений для этой позиции.
             </div>
           ) : (
@@ -708,18 +852,13 @@ function CatalogUI({
   useEffect(() => {
     const loadUser = async () => {
       try {
-        const res = await fetch("/api/auth/me", {
-          credentials: "include", // Ensure cookies are sent
+        const data = await apiClient.get<{ user?: any }>("/api/auth/me", {
+          headers: { credentials: "include" },
         });
-        if (res.ok) {
-          const data = await res.json();
-          setUser(data.user);
-        }
+        setUser(data.user);
       } catch (err) {
         // Silently ignore errors - user might not be logged in
-        if (process.env.NODE_ENV === "development") {
-          console.debug("[CatalogUI] Failed to load user:", err);
-        }
+        devError("Failed to load user:", err);
       }
     };
     void loadUser().catch(() => {
@@ -755,9 +894,9 @@ function CatalogUI({
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-transparent transition-colors dark:bg-background">
-      <header className="shrink-0 z-40 border-b border-border bg-card dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+      <header className="shrink-0 z-40 border-b glass glass-strong">
         <div className="hidden md:block">
-          <div className="bg-card dark:bg-white/10 dark:backdrop-blur-md">
+          <div className="glass glass-strong">
             <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-6 py-3">
               <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
                 <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-light shadow-vilka-soft">
@@ -771,7 +910,7 @@ function CatalogUI({
 
               <div className="hidden flex-1 flex-col gap-2 md:flex">
                 <div className="flex items-center gap-2">
-                  <div className="relative flex flex-1 items-center gap-3 rounded-full bg-card border border-border px-4 py-2 shadow-vilka-soft dark:bg-white/10 dark:backdrop-blur-md dark:shadow-lg dark:border-white/10">
+                  <div className="relative flex flex-1 items-center gap-3 rounded-full glass glass-subtle px-4 py-2 shadow-vilka-soft">
                     <Search className="h-4 w-4 text-foreground-muted" />
                     <input
                       ref={searchInputRef}
@@ -827,7 +966,7 @@ function CatalogUI({
                     className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm md:flex ${
                       currentAddressLabel === "Указать адрес доставки"
                         ? "border-brand bg-brand text-white hover:bg-brand-dark"
-                        : "border-border bg-card text-foreground hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+                        : "glass glass-subtle text-foreground hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-white/20"
                     }`}
                   >
                     <MapPin className="h-3.5 w-3.5" />
@@ -841,7 +980,7 @@ function CatalogUI({
                     <button
                       type="button"
                       onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+                      className="flex h-8 w-8 items-center justify-center rounded-full glass glass-subtle text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-white/20"
                     >
                       <MoreVertical className="h-4 w-4" />
                     </button>
@@ -894,7 +1033,7 @@ function CatalogUI({
                   <button
                     type="button"
                     onClick={() => setIsAuthOpen(true)}
-                    className="hidden items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20 md:flex"
+                    className="hidden items-center gap-2 rounded-full glass glass-subtle px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-white/20 md:flex"
                   >
                     <User className="h-3.5 w-3.5" />
                     <span>Войти</span>
@@ -905,7 +1044,7 @@ function CatalogUI({
                   <button
                     type="button"
                     onClick={() => setIsMiniCartOpen((v) => !v)}
-                    className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-bold text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+                    className="inline-flex items-center gap-2 rounded-full glass glass-subtle px-3 py-1.5 text-sm font-bold text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-white/20"
                   >
                     <ShoppingBag className="h-4 w-4" />
                     <span>
@@ -936,7 +1075,7 @@ function CatalogUI({
                             return (
                             <div
                               key={offer.id}
-                              className="flex items-center justify-between rounded-xl bg-white border border-border px-2 py-2 dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10"
+                              className="flex items-center justify-between rounded-xl glass px-2 py-2"
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="line-clamp-1 text-sm font-semibold text-slate-900 dark:text-white">
@@ -991,7 +1130,7 @@ function CatalogUI({
                 className={`flex flex-1 items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-medium shadow-sm ${
                   currentAddressLabel === "Указать адрес доставки"
                     ? "border-brand bg-brand text-white hover:bg-brand-dark"
-                    : "border-border bg-card text-foreground hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+                    : "glass glass-subtle text-foreground hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-white/20"
                 }`}
               >
                 <MapPin className="h-3.5 w-3.5" />
@@ -1005,7 +1144,7 @@ function CatalogUI({
                 <button
                   type="button"
                   onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+                  className="flex h-8 w-8 items-center justify-center rounded-full glass glass-subtle text-foreground shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-white/20"
                 >
                   <MoreVertical className="h-4 w-4" />
                 </button>
@@ -1069,10 +1208,10 @@ function CatalogUI({
             </button>
           </div>
 
-          <div className="sticky top-0 z-30 bg-background/95 backdrop-blur dark:bg-white/10 dark:backdrop-blur-md">
+          <div className="sticky top-0 z-30 bg-background/95 glass glass-strong">
             <div className="mx-auto max-w-7xl px-4 pb-2">
               <div className="flex items-center gap-2">
-                <div className="relative flex flex-1 items-center gap-3 rounded-full bg-card border border-border px-4 py-2 shadow-vilka-soft dark:bg-white/10 dark:border-white/10">
+                <div className="relative flex flex-1 items-center gap-3 rounded-full glass glass-subtle px-4 py-2 shadow-vilka-soft">
                   <Search className="h-4 w-4 text-foreground-muted" />
                   <input
                     type="text"
@@ -1123,36 +1262,7 @@ function CatalogUI({
       <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-4 pt-4 md:pt-6">
         <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-6 md:grid-cols-[64px_minmax(0,1fr)_320px] lg:grid-cols-[200px_minmax(0,1fr)_320px] xl:grid-cols-[240px_minmax(0,1fr)_320px]">
           <aside
-            ref={(el: HTMLElement | null) => {
-              if (el && shouldLogAgent()) {
-                try {
-                  const width = window.getComputedStyle(el).width;
-                  const display = window.getComputedStyle(el).display;
-                  const firstBtn = el.querySelector("button");
-                  const btnTextVisible = firstBtn
-                    ? window.getComputedStyle(firstBtn.querySelector('span[class*="hidden"]') as Element).display !==
-                      "none"
-                    : false;
-                  agentLog({
-                    location: "CatalogPageClient.tsx:399",
-                    message: "Sidebar render check",
-                    data: {
-                      sidebarWidth: width,
-                      display,
-                      textVisible: btnTextVisible,
-                      viewportWidth: window.innerWidth,
-                    },
-                    timestamp: Date.now(),
-                    sessionId: "debug-session",
-                    runId: "run1",
-                    hypothesisId: "A",
-                  });
-                } catch {
-                  // Silently ignore
-                }
-              }
-            }}
-            className="hidden h-full w-full overflow-y-auto rounded-3xl bg-card shadow-vilka-soft dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 md:block md:w-auto md:border md:border-border"
+            className="hidden h-full w-full overflow-y-auto rounded-3xl glass shadow-vilka-soft md:block md:w-auto md:border"
           >
             <div className="rounded-3xl bg-card p-2 dark:bg-transparent md:p-3">
               <h2 className="hidden px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted lg:block">
@@ -1172,32 +1282,6 @@ function CatalogUI({
                         type="button"
                         onClick={() => handleCategoryClick(cat.id)}
                         title={cat.name}
-                        onMouseEnter={(e: { currentTarget: HTMLElement }) => {
-                          if (shouldLogAgent()) {
-                            try {
-                              const el = e.currentTarget;
-                              const tooltipEl = window.getComputedStyle(el, "::after");
-                              const tooltipOpacity = tooltipEl.opacity;
-                              const viewportWidth = window.innerWidth;
-                              agentLog({
-                                location: "CatalogPageClient.tsx:416",
-                                message: "Tooltip hover check",
-                                data: {
-                                  categoryName: cat.name,
-                                  viewportWidth,
-                                  tooltipOpacity,
-                                  hasTooltipClass: el.classList.contains("tooltip-icon-only"),
-                                },
-                                timestamp: Date.now(),
-                                sessionId: "debug-session",
-                                runId: "run1",
-                                hypothesisId: "B",
-                              });
-                            } catch {
-                              // Silently ignore
-                            }
-                          }
-                        }}
                         className={[
                           "group flex w-full items-center justify-between rounded-2xl px-2 py-2 text-left transition",
                           "md:justify-center lg:justify-between",
@@ -1208,65 +1292,12 @@ function CatalogUI({
                         ].join(" ")}
                       >
                           <span
-                            ref={(el: HTMLElement | null) => {
-                              if (el && shouldLogAgent()) {
-                                try {
-                                  const justifyContent = window.getComputedStyle(el).justifyContent;
-                                  const viewportWidth = window.innerWidth;
-                                  agentLog({
-                                    location: "CatalogPageClient.tsx:429",
-                                    message: "Icon container alignment check",
-                                    data: {
-                                      categoryName: cat.name,
-                                      justifyContent,
-                                      viewportWidth,
-                                      expectedCenter: viewportWidth >= 768 && viewportWidth < 1024,
-                                    },
-                                    timestamp: Date.now(),
-                                    sessionId: "debug-session",
-                                    runId: "run1",
-                                    hypothesisId: "D",
-                                  });
-                                } catch {
-                                  // Silently ignore
-                                }
-                              }
-                            }}
-                          className="flex min-w-0 flex-1 items-center gap-2 lg:gap-3"
-                        >
+                            className="flex min-w-0 flex-1 items-center gap-2 lg:gap-3"
+                          >
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-muted border border-border shadow-sm text-lg md:h-10 md:w-10 dark:bg-white/10 dark:border-white/10">
                             <CategoryEmoji code={cat.id} />
                           </span>
                           <span
-                            ref={(el: HTMLElement | null) => {
-                              if (el && shouldLogAgent()) {
-                                try {
-                                  const display = window.getComputedStyle(el).display;
-                                  const width = window.getComputedStyle(el).width;
-                                  const textEl = el.querySelector("span");
-                                  const textWidth = textEl ? window.getComputedStyle(textEl).width : "unknown";
-                                  const textOverflow = textEl ? window.getComputedStyle(textEl).textOverflow : "unknown";
-                                  agentLog({
-                                    location: "CatalogPageClient.tsx:433",
-                                    message: "Text visibility and truncation check",
-                                    data: {
-                                      categoryName: cat.name,
-                                      textContainerDisplay: display,
-                                      textContainerWidth: width,
-                                      textWidth,
-                                      textOverflow,
-                                      viewportWidth: window.innerWidth,
-                                    },
-                                    timestamp: Date.now(),
-                                    sessionId: "debug-session",
-                                    runId: "run1",
-                                    hypothesisId: "C",
-                                  });
-                                } catch {
-                                  // Silently ignore
-                                }
-                              }
-                            }}
                             className="hidden min-w-0 flex-col lg:flex"
                           >
                             <span className="truncate text-sm leading-tight">{cat.name}</span>
@@ -1295,7 +1326,7 @@ function CatalogUI({
                               <div key={sub.id}>
                                 <button
                                   type="button"
-                                  onClick={() => handleSubcategoryClick(sub.id)}
+                                  onClick={(e) => handleSubcategoryClick(sub.id, e)}
                                   title={sub.name}
                                   className={[
                                     "flex w-full min-w-0 items-center justify-between rounded-2xl px-3 py-1.5 text-left text-xs transition",
@@ -1318,12 +1349,12 @@ function CatalogUI({
             </div>
           </aside>
 
-          <section className="flex min-w-0 flex-1 min-h-0 flex-col gap-4 overflow-y-auto rounded-3xl border border-border bg-card p-4 shadow-vilka-soft dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+          <section className="flex min-w-0 flex-1 min-h-0 flex-col gap-4 overflow-y-auto rounded-3xl glass p-4 shadow-vilka-soft">
             {/* Информационный блок */}
-            <div className="rounded-[var(--vilka-radius-xl)] border border-border bg-card p-5 sm:p-6 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+              <div className="rounded-[var(--vilka-radius-xl)] glass p-5 sm:p-6">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="max-w-md">
-                  <div className="inline-flex items-center gap-2 rounded-full bg-card border border-border px-3 py-1 text-xs font-medium text-foreground shadow-sm dark:bg-white/10 dark:border-white/10">
+                  <div className="inline-flex items-center gap-2 rounded-full glass glass-subtle px-3 py-1 text-xs font-medium text-foreground shadow-sm">
                     <Clock className="h-3.5 w-3.5" />
                     <span>Горячая еда за 25–35 минут</span>
                   </div>
@@ -1338,7 +1369,7 @@ function CatalogUI({
                   </p>
                 </div>
 
-                <div className="flex flex-col gap-2 rounded-3xl bg-white border border-border p-4 text-sm sm:w-64 dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10">
+                <div className="flex flex-col gap-2 rounded-3xl glass p-4 text-sm sm:w-64">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-foreground-muted">Минимальная сумма заказа</span>
                     <span className="text-sm font-semibold text-foreground">от 0 ₽</span>
@@ -1435,7 +1466,7 @@ function CatalogUI({
 
           <aside className="hidden h-full w-full shrink-0 overflow-y-auto lg:block">
             <div className="flex h-full flex-col gap-3 pb-6">
-              <div className="flex flex-1 flex-col rounded-3xl border border-border bg-card p-4 shadow-vilka-soft dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+              <div className="flex flex-1 flex-col rounded-3xl glass p-4 shadow-vilka-soft">
                 <h2 className="text-base font-semibold text-foreground">Доставка 15 минут</h2>
 
                 <div className="mt-2">
@@ -1443,7 +1474,7 @@ function CatalogUI({
                   <select
                     value={deliverySlot}
                     onChange={(e: { target: { value: string } }) => setDeliverySlot(e.target.value)}
-                    className="mt-1 w-full rounded-2xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none hover:border-slate-300 focus:border-brand dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:border-white/20"
+                    className="mt-1 w-full rounded-2xl glass glass-subtle px-3 py-2 text-sm text-foreground outline-none hover:border-slate-300 focus:border-brand dark:hover:border-white/20"
                   >
                     <option value="asap">Как можно скорее</option>
                     <option value="by-1930">К 19:30</option>
@@ -1467,7 +1498,7 @@ function CatalogUI({
                         const noteState = lineNotes[offer.id] ?? { comment: "", allowReplacement: true };
 
                         return (
-                          <div key={offer.id} className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-3 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+                          <div key={offer.id} className="flex flex-col gap-2 rounded-2xl glass p-3">
                             <div className="flex items-start gap-3">
                               <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-skeleton-base border border-border shadow-sm dark:bg-white/10 dark:border-white/10">
                                 {offer.imageUrl ? (
@@ -1495,25 +1526,21 @@ function CatalogUI({
 
                                 <button
                                   type="button"
-                                  className="mt-1 inline-flex w-fit items-center gap-1 rounded-full border border-border bg-white px-2 py-1 text-[11px] font-medium text-foreground-muted hover:border-slate-300 hover:bg-hover active:scale-95 transition-transform transform-gpu dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+                                  className="mt-1 inline-flex w-fit items-center gap-1 rounded-full glass glass-subtle px-2 py-1 text-[11px] font-medium text-foreground-muted hover:border-slate-300 hover:bg-hover active:scale-95 transition-transform transform-gpu dark:hover:bg-white/20"
                                   onClick={() => {
                                     void (async () => {
                                       const next = !lineFavorites[offer.id];
                                       setLineFavorites((prev) => ({ ...prev, [offer.id]: next }));
                                       try {
-                                        await fetch("/api/favorites/toggle", {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({
+                                        await apiClient.post("/api/favorites/toggle", {
+                                          body: {
                                             userId: 1,
                                             menuItemId: Number(offer.baseItemId),
                                             favorite: next,
-                                          }),
+                                          },
                                         });
                                       } catch (e) {
-                                        if (process.env.NODE_ENV === "development") {
-                                          console.debug("[CatalogUI] Favorite toggle failed:", e);
-                                        }
+                                        devError("Favorite toggle failed:", e);
                                       }
                                     })().catch(() => {
                                       // Silently ignore unhandled promise rejections
@@ -1529,7 +1556,7 @@ function CatalogUI({
                                   <span>{lineFavorites[offer.id] ? "В избранном" : "В избранное"}</span>
                                 </button>
 
-                                <div className="mt-2 flex items-center justify-between rounded-full bg-card border border-border px-3 py-1.5 shadow-sm dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10">
+                                <div className="mt-2 flex items-center justify-between rounded-full glass glass-subtle px-3 py-1.5 shadow-sm">
                                   {/* Анимация нажатия на +/- */}
                                   <div className="[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95">
                                     <QuantityControls
@@ -1571,14 +1598,14 @@ function CatalogUI({
               </div>
 
               {totals.totalCount > 0 && (
-                <div className="rounded-3xl bg-card p-3 shadow-vilka-soft dark:bg-white/10 dark:backdrop-blur-md">
+                <div className="rounded-3xl glass p-3 shadow-vilka-soft">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2">
                       <input
                         id="save-cart-name"
                         type="text"
                         placeholder="Например: Обед в офис"
-                        className="w-full rounded-2xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-brand dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md"
+                        className="w-full rounded-2xl glass glass-subtle px-3 py-2 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-brand"
                         onChange={() => {}}
                       />
                       <button
@@ -1590,15 +1617,11 @@ function CatalogUI({
                             const name = nameInput?.value?.trim();
                             if (!name) return;
                             try {
-                              await fetch("/api/cart/save", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ cartId: 1, userId: 1, name }),
+                              await apiClient.post("/api/cart/save", {
+                                body: { cartId: 1, userId: 1, name },
                               });
                             } catch (e) {
-                              if (process.env.NODE_ENV === "development") {
-                                console.debug("[CatalogUI] Save cart failed:", e);
-                              }
+                              devError("Save cart failed:", e);
                             }
                           })().catch(() => {
                             // Silently ignore unhandled promise rejections
@@ -1614,26 +1637,22 @@ function CatalogUI({
                         id="apply-saved-id"
                         type="number"
                         placeholder="ID сохранённого сета"
-                        className="w-full rounded-2xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-brand dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md"
+                        className="w-full rounded-2xl glass glass-subtle px-3 py-2 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-brand"
                       />
                       <button
                         type="button"
-                        className="rounded-2xl border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground shadow-sm hover:border-border hover:bg-hover active:scale-95 transition-transform transform-gpu dark:bg-white/10 dark:backdrop-blur-md dark:hover:bg-white/20"
+                        className="rounded-2xl glass glass-subtle px-3 py-2 text-sm font-semibold text-foreground shadow-sm hover:border-border hover:bg-hover active:scale-95 transition-transform transform-gpu dark:hover:bg-white/20"
                         onClick={() => {
                           void (async () => {
                             const input = document.getElementById("apply-saved-id") as HTMLInputElement | null;
                             const id = input?.value;
                             if (!id) return;
                             try {
-                              await fetch("/api/cart/apply-saved", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ savedCartId: Number(id) }),
+                              await apiClient.post("/api/cart/apply-saved", {
+                                body: { savedCartId: Number(id) },
                               });
                             } catch (e) {
-                              if (process.env.NODE_ENV === "development") {
-                                console.debug("[CatalogUI] Apply saved cart failed:", e);
-                              }
+                              devError("Apply saved cart failed:", e);
                             }
                           })().catch(() => {
                             // Silently ignore unhandled promise rejections
@@ -1656,7 +1675,7 @@ function CatalogUI({
         </div>
       </section>
 
-      <footer className="shrink-0 border-t border-border bg-card dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md">
+      <footer className="shrink-0 border-t glass glass-strong">
         <div className="flex w-full flex-col gap-2 px-6 py-3 text-xs text-foreground-muted md:flex-row md:items-center md:justify-between">
           <span>© {new Date().getFullYear()} Вилка. Доставка еды из ресторанов и пекарен.</span>
           <div className="flex flex-wrap gap-3">
@@ -1689,33 +1708,31 @@ function CatalogUI({
             // Небольшая задержка для гарантии, что cookie установлен
             await new Promise((resolve) => setTimeout(resolve, 100));
             
-            const res = await fetch("/api/auth/me", {
-              credentials: "include", // Ensure cookies are sent
+            const data = await apiClient.get<{ user?: any }>("/api/auth/me", {
+              headers: { credentials: "include" },
             });
-            console.log("[CatalogUI] /api/auth/me response status:", res.status);
             
-            const data = await res.json().catch(() => ({}));
-            console.log("[CatalogUI] /api/auth/me response data:", data);
+            devLog("/api/auth/me response", data);
             
             if (data.user) {
-              console.log("[CatalogUI] Setting user:", data.user);
+              devLog("Setting user:", data.user);
               setUser(data.user);
 
               // IMPORTANT: подтягиваем серверную корзину под новым auth (иначе пустая локальная может затереть user-cart)
-              console.log("[CatalogUI] Reloading cart");
+              devLog("Reloading cart");
               await reloadCart();
 
               if (pendingAddOfferId != null) {
-                console.log("[CatalogUI] Adding pending offer:", pendingAddOfferId);
+                devLog("Adding pending offer:", pendingAddOfferId);
                 add(pendingAddOfferId);
                 setPendingAddOfferId(null);
                 setIsAuthOpen(false);
               }
             } else {
-              console.warn("[CatalogUI] No user in response, user might not be logged in");
+              devWarn("No user in response, user might not be logged in");
             }
           } catch (err) {
-            console.error("[CatalogUI] Failed to load user after auth:", err);
+            devError("Failed to load user after auth:", err);
             // Не выбрасываем ошибку, чтобы модалка закрылась
           }
         }}

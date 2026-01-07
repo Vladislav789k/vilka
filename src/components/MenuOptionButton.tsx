@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, type CSSProperties, isValidElement } from "react";
+import { type ReactNode, type CSSProperties, isValidElement, useState, useEffect } from "react";
 import { useTheme } from "next-themes";
 
 type MenuOptionButtonProps = {
@@ -30,7 +30,13 @@ export function MenuOptionButton({
   "aria-label": ariaLabel,
 }: MenuOptionButtonProps) {
   const { theme } = useTheme();
-  const isDark = theme === "dark";
+  const [mounted, setMounted] = useState(false);
+
+  // Only apply theme-dependent styles after hydration to avoid mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Ensure children is not empty - if it is, don't render the button
   const hasContent =
     (typeof children === "string" && children.trim().length > 0) ||
@@ -62,19 +68,23 @@ export function MenuOptionButton({
   // Inline style ensures the selected primary option stays green and readable.
   // Explicit inline backgrounds/borders to keep pills readable, especially in light theme,
   // while still allowing text color to be controlled by shimmer / Tailwind classes.
+  // Only apply inline styles after hydration to avoid server/client mismatch.
   let inlineStyle: CSSProperties | undefined;
 
-  if (!isDark) {
-    const isBrandSelected = isSelected && (variant === "primary" || variant === "default");
-    inlineStyle = {
-      backgroundColor: isBrandSelected ? "#16a34a" : "#ffffff",
-      borderColor: isBrandSelected ? "#16a34a" : "#cbd5e1",
-    };
-  } else if (variant === "primary" && isSelected) {
-    inlineStyle = {
-      backgroundColor: "#16a34a",
-      borderColor: "#16a34a",
-    };
+  if (mounted) {
+    const isDark = theme === "dark";
+    if (!isDark) {
+      const isBrandSelected = isSelected && (variant === "primary" || variant === "default");
+      inlineStyle = {
+        backgroundColor: isBrandSelected ? "#16a34a" : "#ffffff",
+        borderColor: isBrandSelected ? "#16a34a" : "#cbd5e1",
+      };
+    } else if (variant === "primary" && isSelected) {
+      inlineStyle = {
+        backgroundColor: "#16a34a",
+        borderColor: "#16a34a",
+      };
+    }
   }
 
   return (

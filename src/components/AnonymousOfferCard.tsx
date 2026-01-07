@@ -43,7 +43,7 @@ const AnonymousOfferCard = ({
   return (
     <article 
       onClick={handleCardClick}
-      className={`flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all duration-150 hover:shadow-md hover:border-slate-300 dark:border-white/10 dark:bg-white/10 dark:backdrop-blur-md ${hasHandlers && quantity === 0 ? 'cursor-pointer active:scale-[0.98]' : ''}`}
+      className={`flex h-full flex-col overflow-hidden rounded-2xl glass shadow-sm transition-all duration-150 hover:shadow-md hover:border-slate-300 ${hasHandlers && quantity === 0 ? 'cursor-pointer active:scale-[0.98]' : ''}`}
     >
       {/* Изображение с оверлеем */}
       <div className="relative h-40 w-full bg-surface-soft">

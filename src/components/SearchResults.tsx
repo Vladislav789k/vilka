@@ -173,7 +173,7 @@ export function SearchResults({
   if (results.length === 0) {
     return (
       <div
-        className="absolute left-0 right-0 top-full z-50 mt-2 max-h-96 overflow-y-auto rounded-2xl border border-border bg-white/95 text-slate-900 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-800 dark:text-slate-50"
+        className="absolute left-0 right-0 top-full z-50 mt-2 max-h-96 overflow-y-auto rounded-2xl bg-white border border-border text-slate-900 shadow-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white"
         data-shimmer-exclude
       >
         <div className="p-6 text-center">
@@ -183,10 +183,10 @@ export function SearchResults({
             <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{hint}</p>
           ) : (
             <>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              <p className="text-sm font-medium text-slate-900 dark:text-white">
                 Ничего не найдено по запросу &quot;{query}&quot;
               </p>
-              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
                 Попробуйте изменить запрос или выберите категорию
               </p>
             </>
@@ -198,22 +198,22 @@ export function SearchResults({
 
   return (
     <div
-      className="absolute left-0 right-0 top-full z-50 mt-2 max-h-96 overflow-y-auto rounded-2xl border border-border bg-white/95 text-slate-900 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-800 dark:text-slate-50"
+      className="absolute left-0 right-0 top-full z-50 mt-2 max-h-96 overflow-y-auto rounded-2xl bg-white border border-border text-slate-900 shadow-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white"
       data-shimmer-exclude
     >
-      <div className="sticky top-0 flex items-center justify-between border-b border-border bg-white/95 px-4 py-2 dark:border-white/10 dark:bg-slate-800">
-        <span className="text-sm font-semibold text-slate-900 dark:text-slate-50">
+      <div className="sticky top-0 flex items-center justify-between border-b border-border bg-white dark:bg-slate-800 dark:border-slate-700 px-4 py-2">
+        <span className="text-sm font-semibold text-slate-900 dark:text-white">
           Найдено: {results.length}
         </span>
         <button
           onClick={onClose}
-          className="rounded-full p-1 hover:bg-slate-100 dark:hover:bg-white/10"
+          className="rounded-full p-1 hover:bg-slate-100 dark:hover:bg-slate-700"
           aria-label="Закрыть"
         >
-          <X className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+          <X className="h-4 w-4 text-slate-500 dark:text-slate-300" />
         </button>
       </div>
-      <div ref={listRef} className="divide-y divide-border dark:divide-white/10">
+      <div ref={listRef} className="divide-y divide-border dark:divide-slate-700">
         {results.map((result, index) => {
           const itemId = getItemId(result.id);
           const categoryId = getCategoryId(result.id);
@@ -227,6 +227,15 @@ export function SearchResults({
             return null;
           }
 
+          const handleOpen = (e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (onSelectItem && itemId && categoryId && subcategoryId) {
+              onSelectItem(itemId, categoryId, subcategoryId);
+              onClose();
+            }
+          };
+
           return (
             <div
               key={result.id}
@@ -235,8 +244,8 @@ export function SearchResults({
               }}
               className={`flex items-center gap-3 p-3 transition-colors ${
                 isSelected
-                  ? "bg-hover dark:bg-white/10"
-                  : "hover:bg-hover dark:hover:bg-white/5"
+                  ? "bg-slate-100 dark:bg-slate-700"
+                  : "hover:bg-slate-50 dark:hover:bg-slate-700/50"
               }`}
             >
               {result.image_url ? (
@@ -246,12 +255,12 @@ export function SearchResults({
                   className="h-16 w-16 rounded-xl object-cover"
                 />
               ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-skeleton-base border border-border shadow-sm dark:bg-white/10 dark:border-white/10">
-                  <span className="text-xs text-foreground-muted">нет фото</span>
+                <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-slate-100 border border-border shadow-sm dark:bg-slate-700 dark:border-slate-600">
+                  <span className="text-xs text-slate-500 dark:text-slate-300">нет фото</span>
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50 line-clamp-1">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-1">
                   {highlightMatches(result.name, query)}
                 </h3>
                 {result.description && (
@@ -265,7 +274,7 @@ export function SearchResults({
                       -{result.discount_percent}%
                     </span>
                   )}
-                  <span className="text-sm font-bold text-slate-900 dark:text-slate-50">
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">
                     {finalPrice} ₽
                   </span>
                   {result.discount_percent && (
@@ -277,25 +286,24 @@ export function SearchResults({
               </div>
               <div className="flex flex-col gap-2">
                 <button
-                  onClick={() => {
-                    onSelectItem(itemId, categoryId, subcategoryId);
-                    onClose();
-                  }}
-                  className="flex items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-medium text-slate-900 shadow-sm hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800 dark:text-slate-50 dark:hover:bg-slate-700"
+                  onClick={handleOpen}
+                  className="flex items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-medium text-slate-900 shadow-sm transition-all duration-150 hover:bg-slate-100 active:scale-95 transform-gpu dark:border-slate-600 dark:bg-slate-700 dark:text-white dark:hover:bg-slate-600"
                   aria-label="Открыть"
+                  type="button"
                 >
                   <ExternalLink className="h-3 w-3" />
                   Открыть
                 </button>
                 <button
-                  onClick={() => {
-                    const itemId = getItemId(result.id);
-                    if (itemId) {
-                      add(String(result.id));
-                    }
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // result.id is menu_item_id, which should match offer.id
+                    add(String(result.id));
                   }}
-                  className="flex items-center gap-1 rounded-lg border border-border bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark dark:border-white/10"
+                  className="flex items-center gap-1 rounded-lg border border-border bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all duration-150 hover:bg-brand-dark active:scale-95 transform-gpu dark:border-brand dark:bg-brand dark:hover:bg-brand-dark"
                   aria-label="В корзину"
+                  type="button"
                 >
                   <ShoppingCart className="h-3 w-3" />
                   В корзину
@@ -306,8 +314,8 @@ export function SearchResults({
         })}
       </div>
       {results.length >= 10 && (
-        <div className="border-t border-border bg-card px-4 py-2 text-center dark:border-white/10 dark:bg-white/5">
-          <p className="text-xs text-foreground-muted">
+        <div className="border-t border-border bg-white dark:bg-slate-800 dark:border-slate-700 px-4 py-2 text-center">
+          <p className="text-xs text-slate-600 dark:text-slate-300">
             Показано {results.length} результатов. Уточните запрос для более точного поиска.
           </p>
         </div>
