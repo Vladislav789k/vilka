@@ -12,7 +12,6 @@ type CatalogRow = {
   image_url: string | null;
   is_brand_anonymous: boolean;
   stock_qty: number;
-  tags: string[] | null;
   ref_category_id: number;
   category_level: number;
   level1_code: string | null;
@@ -37,7 +36,6 @@ export async function getCatalogData(): Promise<CatalogData> {
       mi.image_url          AS image_url,
       mi.is_brand_anonymous AS is_brand_anonymous,
       mi.stock_qty          AS stock_qty,
-      mi.tags               AS tags,
       c.id                  AS ref_category_id,
       c.level               AS category_level,
       CASE
@@ -177,19 +175,6 @@ export async function getCatalogData(): Promise<CatalogData> {
       finalPrice = Math.round(row.price * (1 - row.discount_percent / 100));
     }
 
-    // Infer isSpicy and isVegetarian from tags or name/description
-    const tags = row.tags || [];
-    const nameLower = row.menu_item_name.toLowerCase();
-    const compositionLower = (row.composition || "").toLowerCase();
-    const isSpicy = 
-      tags.some(tag => /остр|spicy|горяч/i.test(tag)) ||
-      /остр|spicy|чили|перец/i.test(nameLower) ||
-      /остр|spicy|чили|перец/i.test(compositionLower);
-    const isVegetarian = 
-      tags.some(tag => /вегет|vegetarian|vegan/i.test(tag)) ||
-      /вегет|vegetarian|vegan|растительн/i.test(nameLower) ||
-      /вегет|vegetarian|vegan|растительн/i.test(compositionLower);
-
     offers.push({
       id: String(row.menu_item_id),
       baseItemId,
@@ -202,8 +187,6 @@ export async function getCatalogData(): Promise<CatalogData> {
       imageUrl: row.image_url,
       menuItemName: row.menu_item_name,
       stock: row.stock_qty ?? 0,
-      isSpicy,
-      isVegetarian,
     });
   }
 

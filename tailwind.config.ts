@@ -1,7 +1,6 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  darkMode: "class",
   content: [
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -15,43 +14,10 @@ const config: Config = {
           DEFAULT: "#16a34a", // зелёный (типа green-600)
           dark: "#15803d",    // тёмно-зелёный
         },
-        // Design tokens for light/dark themes (shadcn-compatible)
-        background: {
-          DEFAULT: "rgb(var(--background))",
-        },
-        card: {
-          DEFAULT: "rgb(var(--card))",
-        },
-        muted: {
-          DEFAULT: "rgb(var(--muted))",
-        },
-        border: {
-          DEFAULT: "rgb(var(--border))", /* Full opacity for better visibility */
-        },
-        input: {
-          DEFAULT: "rgb(var(--input))",
-        },
-        ring: {
-          DEFAULT: "rgb(var(--ring) / 0.3)",
-        },
-        foreground: {
-          DEFAULT: "rgb(var(--foreground))",
-          muted: "rgb(var(--foreground-muted))",
-        },
-        hover: {
-          DEFAULT: "rgb(var(--hover))",
-        },
-        skeleton: {
-          base: "rgb(var(--skeleton-base) / 0.6)",
-          shimmer: "rgb(var(--skeleton-shimmer) / 0.6)",
-        },
-        focus: {
-          ring: "rgb(var(--ring) / 0.3)",
-        },
-        // Legacy surface tokens (for backward compatibility)
+        // бело-серая поверхность
         surface: {
-          DEFAULT: "rgb(var(--card))", // карточки, блоки
-          soft: "rgb(var(--background))",    // общий фон, «подложка» (page background)
+          DEFAULT: "#ffffff", // карточки, блоки
+          soft: "#f5f5f5",    // общий фон, «подложка»
         },
       },
       boxShadow: {

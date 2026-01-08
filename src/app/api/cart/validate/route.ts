@@ -11,26 +11,16 @@ type ValidateCartRequest = {
 };
 
 export async function POST(req: NextRequest) {
-  const startTime = Date.now();
   try {
-    if (process.env.NODE_ENV === "development") {
-      console.log("[POST /api/cart/validate] Request received");
-    }
-    
+    console.log("[POST /api/cart/validate] Request received");
     const body = (await req.json()) as ValidateCartRequest;
-    
-    if (process.env.NODE_ENV === "development") {
-      console.log("[POST /api/cart/validate] Body:", JSON.stringify(body, null, 2));
-    }
+    console.log("[POST /api/cart/validate] Body:", JSON.stringify(body, null, 2));
     
     const identity = await resolveCartIdentity();
-    
-    if (process.env.NODE_ENV === "development") {
-      console.log("[POST /api/cart/validate] Identity:", {
-        cartToken: identity.cartToken,
-        userId: identity.userId,
-      });
-    }
+    console.log("[POST /api/cart/validate] Identity:", {
+      cartToken: identity.cartToken,
+      userId: identity.userId,
+    });
 
     const { cart, changes, minOrderSum, isMinOrderReached, stockByOfferId } =
       await validateAndPersistCart(identity, {
@@ -38,14 +28,7 @@ export async function POST(req: NextRequest) {
         items: body.items ?? [],
       });
 
-    const duration = Date.now() - startTime;
-    if (process.env.NODE_ENV === "development") {
-      console.log(`[POST /api/cart/validate] Success (${duration}ms)`, {
-        cartToken: cart.cartToken,
-        itemsCount: cart.items.length,
-      });
-    }
-    
+    console.log("[POST /api/cart/validate] Success, cartToken:", cart.cartToken);
     return NextResponse.json({
       cartToken: cart.cartToken,
       deliverySlot: cart.deliverySlot,
@@ -57,17 +40,12 @@ export async function POST(req: NextRequest) {
       stockByOfferId,
     });
   } catch (err) {
-    const duration = Date.now() - startTime;
-    console.error(`[POST /api/cart/validate] Error (${duration}ms):`, err);
-    
-    if (process.env.NODE_ENV === "development") {
-      console.error("[POST /api/cart/validate] Error details:", {
-        message: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined,
-        name: err instanceof Error ? err.name : undefined,
-      });
-    }
-    
+    console.error("[POST /api/cart/validate] Error:", err);
+    console.error("[POST /api/cart/validate] Error details:", {
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      name: err instanceof Error ? err.name : undefined,
+    });
     return NextResponse.json(
       {
         error: "server_error",

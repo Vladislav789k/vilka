@@ -32,8 +32,6 @@ export type Offer = {
   imageUrl?: string | null;
   menuItemName: string;
   stock: number;
-  isSpicy?: boolean;
-  isVegetarian?: boolean;
 };
 
 export type CatalogData = {

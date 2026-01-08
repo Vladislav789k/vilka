@@ -15,12 +15,6 @@ services:
       - ./db/migrations:/db/migrations:ro
     networks:
       - kasashka_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kasashka -d kasashka_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -32,12 +26,6 @@ services:
       - redis_data:/data
     networks:
       - kasashka_net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   minio:
     image: minio/minio:latest
@@ -59,8 +47,7 @@ services:
     image: minio/mc:latest
     container_name: kasashka_minio_init
     depends_on:
-      minio:
-        condition: service_started
+      - minio
     entrypoint:
       - /bin/sh
       - -c
@@ -87,48 +74,33 @@ services:
       dockerfile: Dockerfile
     container_name: kasashka_app
     working_dir: /usr/src/app
-    # Use named volume for node_modules to prevent host overwrite
+    command: sh -c "chmod +x node_modules/.bin/next && npm run dev"
     volumes:
       - ./:/usr/src/app
-      - app_node_modules:/usr/src/app/node_modules
+      - /usr/src/app/node_modules
     environment:
       NODE_ENV: development
-      # Database connection from app container (uses service name 'postgres')
+      # строка подключения к Postgres из контейнера app
       DATABASE_URL: postgresql://kasashka:kasashka_password@postgres:5432/kasashka_db
-      # Redis connection from app container (uses service name 'redis')
+      # строка подключения к Redis из контейнера app
       REDIS_URL: redis://redis:6379
-      # Public API base URL (for client-side requests)
       NEXT_PUBLIC_API_BASE_URL: http://localhost
-      # MinIO (S3-compatible) for image storage
+      # MinIO (S3-compatible) для хранения изображений
       MINIO_ENDPOINT: minio
       MINIO_PORT: "9000"
       MINIO_USE_SSL: "false"
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadminpassword
       MINIO_BUCKET: media
-      # Ollama (LLM inference)
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_started
-      minio_init:
-        condition: service_completed_successfully
+      - postgres
+      - redis
+      - minio
+      - minio_init
     ports:
       - "3000:3000"
     networks:
       - kasashka_net
-    healthcheck:
-      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
 
   nginx:
     image: nginx:alpine
@@ -173,8 +145,7 @@ services:
     image: ollama/ollama:latest
     container_name: kasashka_ollama_init
     depends_on:
-      ollama:
-        condition: service_started
+      - ollama
     entrypoint:
       - /bin/sh
       - -c
@@ -310,7 +281,6 @@ volumes:
   zabbix_db_data:
   zabbix_server_data:
   ollama_data:
-  app_node_modules:  # Named volume for app node_modules to prevent host overwrite
 
 networks:
   kasashka_net:

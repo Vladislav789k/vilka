@@ -43,7 +43,7 @@ const AnonymousOfferCard = ({
   return (
     <article 
       onClick={handleCardClick}
-      className={`flex h-full flex-col overflow-hidden rounded-2xl glass shadow-sm transition-all duration-150 hover:shadow-md hover:border-slate-300 ${hasHandlers && quantity === 0 ? 'cursor-pointer active:scale-[0.98]' : ''}`}
+      className={`flex h-full flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition-all duration-150 hover:shadow-md ${hasHandlers && quantity === 0 ? 'cursor-pointer active:scale-[0.98]' : ''}`}
     >
       {/* Изображение с оверлеем */}
       <div className="relative h-40 w-full bg-surface-soft">
@@ -58,7 +58,7 @@ const AnonymousOfferCard = ({
             style={{ color: "transparent" }}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-skeleton-base border border-border rounded-2xl text-[12px] font-medium text-foreground-muted shadow-sm dark:bg-white/10 dark:border-white/10">
+          <div className="flex h-full w-full items-center justify-center bg-slate-100 text-[12px] font-medium text-slate-500">
             пока ещё нет фото!
           </div>
         )}
@@ -98,15 +98,16 @@ const AnonymousOfferCard = ({
         <div className="mb-3 flex-1">
           {/* Название */}
           <div
-            className="line-clamp-2 text-base font-semibold leading-snug text-foreground"
+            className="line-clamp-2 text-sm font-semibold leading-snug"
             title={name}
+            style={{ color: "rgb(89, 89, 89)" }}
           >
             {name}
           </div>
 
           {/* Спецификация: вес */}
           {subtitle && (
-            <div className="mt-1.5 text-sm font-medium text-foreground-muted">
+            <div className="mt-1.5 text-sm font-semibold" style={{ color: "rgb(166, 166, 166)" }}>
               {subtitle}
             </div>
           )}

@@ -103,11 +103,7 @@ export async function POST(req: NextRequest) {
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 30, // 30 days
-      secure: process.env.NODE_ENV === "production", // Only secure in production (HTTPS)
     });
-
-    console.log("[auth/login] Cookie set successfully, userId:", userId);
-    console.log("[auth/login] Response headers:", Object.fromEntries(response.headers.entries()));
 
     return response;
   } catch (e: any) {

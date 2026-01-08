@@ -16,10 +16,6 @@ const VALID_CODES = ["0000", "1111"]; // технические коды для 
 export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [closing, setClosing] = useState(false);
-  const telegramMountRef = useRef<HTMLDivElement | null>(null);
-  const [telegramError, setTelegramError] = useState<string | null>(null);
-  const telegramBootedRef = useRef(false);
-  const onSuccessRef = useRef<AuthModalProps["onSuccess"]>(onSuccess);
 
   // телефон: храним только цифры после +7
   const [phoneDigits, setPhoneDigits] = useState("");
@@ -57,75 +53,8 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       setCodeError(false);
       setTimer(60);
       setClosing(false); // сбрасываем статус закрытия
-      setTelegramError(null);
-      telegramBootedRef.current = false;
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    onSuccessRef.current = onSuccess;
-  }, [onSuccess]);
-
-  // Telegram Login Widget (renders its own button)
-  useEffect(() => {
-    if (!isOpen) return;
-    if (step !== "phone") return;
-
-    const mount = telegramMountRef.current;
-    if (!mount) return;
-
-    // Avoid re-mounting widget on every render (prevents blinking)
-    if (telegramBootedRef.current) return;
-    telegramBootedRef.current = true;
-
-    mount.innerHTML = "";
-
-    (window as any).onTelegramAuth = async (user: any) => {
-      try {
-        setTelegramError(null);
-        const res = await fetch("/api/auth/telegram", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(user),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setTelegramError((data as any)?.error ?? "telegram_auth_failed");
-          return;
-        }
-
-        // Сначала закрываем окно (анимация + гарантированное закрытие)
-        closeAfterAuth();
-
-        // Затем обновляем состояние пользователя
-        if (onSuccessRef.current) {
-          onSuccessRef.current();
-        } else if (typeof window !== "undefined") {
-          window.location.reload();
-        }
-      } catch (e) {
-        console.error("[AuthModal] Telegram auth error:", e);
-        setTelegramError("telegram_auth_failed");
-      }
-    };
-
-    const script = document.createElement("script");
-    script.async = true;
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.setAttribute("data-telegram-login", "Vilka_Auth_bot");
-    script.setAttribute("data-size", "large");
-    script.setAttribute("data-onauth", "onTelegramAuth(user)");
-    script.setAttribute("data-request-access", "write");
-    mount.appendChild(script);
-
-    return () => {
-      mount.innerHTML = "";
-      telegramBootedRef.current = false;
-      try {
-        delete (window as any).onTelegramAuth;
-      } catch {}
-    };
-  }, [isOpen, step]);
 
   // таймер на шаге ввода кода
   useEffect(() => {
@@ -209,15 +138,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
     }, 500); // ждём окончания анимации
   };
 
-  const closeAfterAuth = () => {
-    // если модалка уже "закрывается", не ждём — просим родителя закрыть сейчас
-    if (closing) {
-      onClose();
-      return;
-    }
-    closeModal();
-  };
-
   const handleCodeSubmit = async (codeValue: string) => {
     const trimmedCode = codeValue.trim();
     
@@ -231,7 +151,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: trimmedCode }),
-        credentials: "include", // Ensure cookies are sent and received
       });
 
       if (!res.ok) {
@@ -242,40 +161,18 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       }
 
       const data = await res.json();
-      console.log("[AuthModal] Login success, response data:", data);
+      console.log("Auth success:", data);
 
       // Успешная авторизация
-      // Cookie устанавливается автоматически через Set-Cookie заголовок
-      // Небольшая задержка, чтобы убедиться, что cookie доступен в браузере
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
       // Вызываем callback для обновления состояния пользователя
       if (onSuccess) {
-        console.log("[AuthModal] Calling onSuccess callback");
-        try {
-          // onSuccess может быть async, поэтому оборачиваем в Promise
-          const result = onSuccess();
-          if (result instanceof Promise) {
-            await result;
-            console.log("[AuthModal] onSuccess completed");
-          } else {
-            console.log("[AuthModal] onSuccess completed (sync)");
-          }
-        } catch (err) {
-          console.error("[AuthModal] Error in onSuccess callback:", err);
-          // Не прерываем процесс, но логируем ошибку
-        }
+        onSuccess();
       } else {
         // Если callback не передан, перезагружаем страницу
-        console.log("[AuthModal] No onSuccess callback, reloading page");
         if (typeof window !== "undefined") {
           window.location.reload();
-          return; // Не закрываем модалку, т.к. страница перезагрузится
         }
       }
-      
-      // Закрываем модалку только после успешного обновления состояния
-      console.log("[AuthModal] Closing modal");
       closeModal();
     } catch (e) {
       console.error("Auth error:", e);
@@ -290,24 +187,23 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-end bg-black/40 px-4">
       <div
-        className={`auth-modal relative w-full max-w-md rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft dark:bg-slate-600 dark:shadow-xl ${
+        className={`auth-modal relative w-full max-w-md rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft ${
           closing ? "closing" : ""
         }`}
-        style={{ color: 'inherit' }}
       >
         {/* Верхняя панель */}
         <div className="mb-8 flex items-center justify-between">
           <button
             type="button"
             onClick={() => (step === "phone" ? closeModal() : setStep("phone"))}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white border border-border text-slate-800 hover:bg-hover dark:bg-slate-500 dark:text-white dark:hover:bg-slate-400 dark:border-white/10 transition-colors"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={closeModal}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white border border-border text-slate-800 hover:bg-hover dark:bg-slate-500 dark:text-white dark:hover:bg-slate-400 dark:border-white/10 transition-colors"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
           >
             <X className="h-4 w-4" />
           </button>
@@ -316,14 +212,13 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         {step === "phone" ? (
           <>
             <div className="flex flex-col items-center gap-4">
-              <span className="text-base font-bold text-black dark:text-white">Телефон</span>
+              <span className="text-sm text-slate-500">Телефон</span>
               <input
                 type="tel"
                 value={phone}
                 onChange={handlePhoneChange}
                 inputMode="numeric"
-                className="w-full border-none bg-transparent text-center text-4xl font-bold tracking-wide text-black outline-none dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                placeholder="+7"
+                className="w-full border-none bg-transparent text-center text-3xl font-semibold tracking-wide text-slate-900 outline-none"
               />
             </div>
 
@@ -337,35 +232,22 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
                   }, 0);
                 }
               }}
-              disabled={!isPhoneComplete}
-              className="mt-10 flex w-full items-center justify-center rounded-full px-4 py-3.5 text-base font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all bg-brand text-white hover:bg-brand-dark dark:bg-brand dark:hover:bg-brand-dark"
+              className="vilka-btn-primary mt-10 flex w-full items-center justify-center rounded-full px-4 py-3 text-sm font-semibold"
             >
               Получить код
             </button>
 
-            <div className="mt-4 flex flex-col items-center gap-2">
-              <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                или
-              </div>
-              <div ref={telegramMountRef} className="min-h-[44px]" />
-              {telegramError && (
-                <div className="text-xs font-semibold text-red-600 dark:text-red-400">
-                  Не удалось войти через Telegram ({telegramError})
-                </div>
-              )}
-            </div>
-
-            <p className="mt-6 text-center text-base leading-relaxed text-black dark:text-white font-semibold">
+            <p className="mt-6 text-center text-[11px] leading-relaxed text-slate-500">
               Продолжая авторизацию, вы соглашаетесь с{" "}
-              <span className="cursor-pointer font-bold text-black underline underline-offset-2 hover:text-slate-700 dark:text-white dark:hover:text-slate-300">
+              <span className="cursor-pointer text-slate-700 underline underline-offset-2">
                 политикой конфиденциальности
               </span>
               ,{" "}
-              <span className="cursor-pointer font-bold text-black underline underline-offset-2 hover:text-slate-700 dark:text-white dark:hover:text-slate-300">
+              <span className="cursor-pointer text-slate-700 underline underline-offset-2">
                 условиями сервиса
               </span>{" "}
               и{" "}
-              <span className="cursor-pointer font-bold text-black underline underline-offset-2 hover:text-slate-700 dark:text-white dark:hover:text-slate-300">
+              <span className="cursor-pointer text-slate-700 underline underline-offset-2">
                 условиями продажи товаров
               </span>
               .
@@ -374,10 +256,10 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         ) : (
           <>
             <div className="flex flex-col items-center gap-6">
-              <span className="text-2xl font-bold text-black dark:text-white tracking-tight">
+              <span className="text-base font-semibold text-slate-900">
                 {phone}
               </span>
-              <div className="text-base font-bold text-black dark:text-white">Код из смс</div>
+              <div className="text-sm text-slate-500">Код из смс</div>
 
               <div className="flex gap-3">
                 {code.map((value, index) => (
@@ -393,24 +275,24 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
                       codeInputsRef.current[index] = el;
                     }}
                     className={[
-                      "h-14 w-12 rounded-2xl text-center text-xl font-bold outline-none transition-all focus:ring-2 focus:ring-brand focus:ring-offset-2",
+                      "h-12 w-10 rounded-2xl text-center text-lg font-semibold outline-none",
                       codeError
-                        ? "bg-red-50 text-red-600 border-2 border-red-400 dark:bg-red-900/40 dark:text-red-300 dark:border-red-500"
-                        : "bg-white text-black border-2 border-slate-300 hover:bg-hover dark:bg-slate-500 dark:text-white dark:border-slate-400 focus:border-brand focus:ring-2 focus:ring-focus-ring dark:focus:border-brand",
+                        ? "bg-red-50 text-red-500 border border-red-300"
+                        : "bg-slate-100 text-slate-900 border border-slate-200",
                     ].join(" ")}
                   />
                 ))}
               </div>
 
               {codeError && (
-                <div className="text-sm font-bold text-red-600 dark:text-red-400">
+                <div className="text-xs font-semibold text-red-500">
                   Не тот код.
                 </div>
               )}
 
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              <div className="text-xs text-slate-500">
                 Получить новый можно через{" "}
-                <span className="font-bold text-black dark:text-white">{formatTimer(timer)}</span>
+                <span>{formatTimer(timer)}</span>
               </div>
             </div>
           </>

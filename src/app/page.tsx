@@ -1,7 +1,10 @@
-import HomePageClient from "./_components/HomePageClient";
+import CatalogPageClient from "./_components/CatalogPageClient";
+import { getCatalogData } from "@/modules/catalog/getCatalogData";
 
-export const revalidate = 60; // Cache for 60 seconds
+export const revalidate = 0; // Temporarily disable cache to see new items immediately
 
-export default function HomePage() {
-  return <HomePageClient />;
+export default async function HomePage() {
+  const catalog = await getCatalogData();
+  return <CatalogPageClient catalog={catalog} />;
 }
+

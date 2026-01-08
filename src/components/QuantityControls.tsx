@@ -51,12 +51,12 @@ export function QuantityControls({
           type="button"
           onClick={handleRemove}
           aria-label="Уменьшить количество"
-          className={`flex ${classes.button} items-center justify-center rounded-full bg-card font-semibold leading-none text-foreground shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1`}
+          className={`flex ${classes.button} items-center justify-center rounded-full bg-white font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1`}
         >
           –
         </button>
         <span
-          className={`${classes.quantity} min-w-[1.5rem] text-center font-semibold text-foreground`}
+          className={`${classes.quantity} min-w-[1.5rem] text-center font-semibold text-slate-900`}
           aria-label={`Количество: ${quantity}`}
         >
           {quantity}
@@ -66,7 +66,7 @@ export function QuantityControls({
             type="button"
             onClick={handleAdd}
             aria-label="Увеличить количество"
-            className={`flex ${classes.button} items-center justify-center rounded-full bg-card font-semibold leading-none text-emerald-500 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1`}
+            className={`flex ${classes.button} items-center justify-center rounded-full bg-white font-semibold leading-none text-emerald-500 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1`}
           >
             +
           </button>

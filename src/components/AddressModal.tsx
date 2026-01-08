@@ -577,23 +577,23 @@ const AddressModalContent = ({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
-      <div className="relative w-full max-w-3xl rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft dark:bg-slate-700">
+      <div className="relative w-full max-w-3xl rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft">
         {/* Верхняя панель */}
         <div className="mb-6 flex items-center justify-between">
           <button
             type="button"
             onClick={() => (step === "list" ? onClose() : setStep("list"))}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white border border-border text-slate-700 dark:bg-slate-600 dark:text-slate-100 dark:border-white/10"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <span className="text-sm font-semibold text-slate-900 dark:text-white">
+          <span className="text-sm font-semibold text-slate-900">
             {step === "list" ? "Выбрать адрес" : "Добавить адрес"}
           </span>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white border border-border text-slate-700 dark:bg-slate-600 dark:text-slate-100 dark:border-white/10"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
           >
             <X className="h-4 w-4" />
           </button>
@@ -602,11 +602,11 @@ const AddressModalContent = ({
         {step === "list" ? (
           <>
             {loading ? (
-              <div className="py-8 text-center text-sm text-slate-600 dark:text-slate-300">
+              <div className="py-8 text-center text-sm text-slate-500">
                 Загрузка адресов...
               </div>
             ) : addresses.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-600 dark:text-slate-300">
+              <div className="py-8 text-center text-sm text-slate-500">
                 У вас пока нет сохраненных адресов
               </div>
             ) : (
@@ -617,7 +617,7 @@ const AddressModalContent = ({
                     <div
                       key={addr.id}
                       className={`flex w-full items-center justify-between rounded-2xl px-3 py-3 transition ${
-                        selected ? "bg-hover dark:bg-slate-600" : ""
+                        selected ? "bg-surface-soft" : ""
                       }`}
                     >
                       <button
@@ -625,11 +625,11 @@ const AddressModalContent = ({
                         onClick={() => handleSelect(addr)}
                         className="flex-1 text-left"
                       >
-                        <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                        <div className="text-sm font-semibold text-slate-900">
                           {addr.address_line}
                         </div>
                         {(addr.city || addr.comment) && (
-                          <div className="text-xs text-slate-600 dark:text-slate-300">
+                          <div className="text-xs text-slate-500">
                             {[addr.city, addr.comment].filter(Boolean).join(" · ")}
                           </div>
                         )}
@@ -637,7 +637,7 @@ const AddressModalContent = ({
                       <button
                         type="button"
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => handleDelete(e, addr.id)}
-                        className="ml-2 flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-red-50 hover:text-red-500 dark:text-slate-400 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                        className="ml-2 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500"
                         title="Удалить адрес"
                       >
                         <X className="h-4 w-4" />
@@ -681,7 +681,7 @@ const AddressModalContent = ({
                 {/* Шаг 1: Ввод города */}
                 {currentStep === "city" && (
                   <div className="relative">
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <label className="text-xs font-semibold text-slate-500">
                       Город
                     </label>
                     <div className="relative">
@@ -700,12 +700,12 @@ const AddressModalContent = ({
                           setTimeout(() => setShowCitySuggestions(false), 200);
                         }}
                         placeholder="Введите город"
-                        className="mt-1 w-full rounded-2xl bg-white border border-border px-3 py-2 text-sm text-slate-900 dark:bg-slate-600 dark:text-white dark:border-white/10"
+                        className="mt-1 w-full rounded-2xl bg-surface-soft px-3 py-2 text-sm text-slate-900"
                         autoFocus
                       />
                     </div>
                     {showCitySuggestions && citySuggestions.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-2xl bg-white shadow-lg border border-slate-200 max-h-48 overflow-y-auto dark:bg-slate-700 dark:border-slate-600">
+                      <div className="absolute z-50 mt-1 w-full rounded-2xl bg-white shadow-lg border border-slate-200 max-h-48 overflow-y-auto">
                         {citySuggestions.map((suggestion, index) => (
                           <button
                             key={index}
@@ -732,12 +732,12 @@ const AddressModalContent = ({
                         setStreetSuggestions([]);
                         setShowStreetSuggestions(false);
                       }}
-                      className="mb-2 flex items-center gap-1 text-xs text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100"
+                      className="mb-2 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
                     >
                       <ArrowLeft className="h-3 w-3" />
                       <span>Изменить город: {city}</span>
                     </button>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <label className="text-xs font-semibold text-slate-500">
                       Улица и дом
                     </label>
                     <div className="relative">
@@ -755,12 +755,12 @@ const AddressModalContent = ({
                           setTimeout(() => setShowStreetSuggestions(false), 200);
                         }}
                         placeholder="Введите улицу и дом"
-                        className="mt-1 w-full rounded-2xl bg-white border border-border px-3 py-2 text-sm text-slate-900 dark:bg-slate-600 dark:text-white dark:border-white/10"
+                        className="mt-1 w-full rounded-2xl bg-surface-soft px-3 py-2 text-sm text-slate-900"
                         autoFocus
                       />
                     </div>
                     {showStreetSuggestions && streetSuggestions.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-2xl bg-white shadow-lg border border-slate-200 max-h-48 overflow-y-auto dark:bg-slate-700 dark:border-slate-600">
+                      <div className="absolute z-50 mt-1 w-full rounded-2xl bg-white shadow-lg border border-slate-200 max-h-48 overflow-y-auto">
                         {streetSuggestions.map((suggestion, index) => (
                           <button
                             key={index}
@@ -769,7 +769,7 @@ const AddressModalContent = ({
                             className="w-full px-3 py-2 text-left text-sm hover:bg-surface-soft transition-colors first:rounded-t-2xl last:rounded-b-2xl"
                           >
                             <div className="font-semibold text-slate-900">{suggestion}</div>
-                            <div className="text-xs text-slate-600 dark:text-slate-300">{city}</div>
+                            <div className="text-xs text-slate-500">{city}</div>
                           </button>
                         ))}
                       </div>
@@ -787,7 +787,7 @@ const AddressModalContent = ({
               className={`mt-6 w-full py-3 text-sm font-semibold rounded-full transition-colors ${
                 city && street && hasHouseNumber(street)
                   ? "vilka-btn-primary"
-                  : "bg-slate-200 text-slate-400 cursor-not-allowed dark:bg-slate-600 dark:text-slate-500"
+                  : "bg-slate-200 text-slate-400 cursor-not-allowed"
               }`}
             >
               Сохранить адрес

@@ -14,31 +14,19 @@ export function updateCartQuantity(
   return { ...cart, [offerId]: nextQty };
 }
 
-/**
- * Build cart entries from cart state and offers
- * Optimized: Uses Map for O(1) lookup instead of O(n) find
- */
 export function buildCartEntries(
   cart: CartState,
   offers: Offer[]
 ): CartEntry[] {
-  // Create a Map for O(1) lookup instead of O(n) find in loop
-  const offerMap = new Map<OfferId, Offer>();
-  for (const offer of offers) {
-    offerMap.set(offer.id, offer);
-  }
-
-  const entries: CartEntry[] = [];
-  for (const [offerId, quantity] of Object.entries(cart)) {
-    const offer = offerMap.get(offerId);
-    if (!offer) continue; // Skip if offer not found
-
-    const lineTotal = offer.price * quantity;
-    const lineOldPrice = offer.oldPrice ? offer.oldPrice * quantity : undefined;
-    entries.push({ offer, quantity, lineTotal, lineOldPrice });
-  }
-
-  return entries;
+  return Object.entries(cart)
+    .map(([offerId, quantity]) => {
+      const offer = offers.find((o) => o.id === offerId);
+      if (!offer) return null;
+      const lineTotal = offer.price * quantity;
+      const lineOldPrice = offer.oldPrice ? offer.oldPrice * quantity : undefined;
+      return { offer, quantity, lineTotal, lineOldPrice };
+    })
+    .filter((x): x is CartEntry => x !== null);
 }
 
 export function calculateTotals(entries: CartEntry[]): CartTotals {

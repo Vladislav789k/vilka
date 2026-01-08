@@ -109,7 +109,7 @@ export default function AIAssistantModal({ isOpen, onClose }: Props) {
       }}
     >
       <div
-        className={`auth-modal relative flex h-full w-full max-w-md flex-col rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft dark:bg-slate-700 ${
+        className={`auth-modal relative flex h-full w-full max-w-md flex-col rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft ${
           closing ? "closing" : ""
         }`}
       >
@@ -120,14 +120,14 @@ export default function AIAssistantModal({ isOpen, onClose }: Props) {
               <Utensils className="h-5 w-5 text-brand-dark" />
             </div>
             <div className="flex flex-col leading-tight">
-              <div className="text-sm font-semibold text-slate-900 dark:text-white">Чат Вилки</div>
-              <div className="text-xs text-slate-600 dark:text-slate-300">Онлайн</div>
+              <div className="text-sm font-semibold text-slate-900">Чат Вилки</div>
+              <div className="text-xs text-slate-500">Онлайн</div>
             </div>
           </div>
           <button
             type="button"
             onClick={closeModal}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white border border-border text-slate-700 dark:bg-slate-600 dark:text-slate-100 dark:border-white/10"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
           >
             <X className="h-4 w-4" />
           </button>
@@ -139,7 +139,7 @@ export default function AIAssistantModal({ isOpen, onClose }: Props) {
           onScroll={handleScroll}
           className="relative flex-1 overflow-auto pr-1"
         >
-          <div className="py-1 text-center text-xs font-semibold text-slate-500 dark:text-slate-400">Сегодня</div>
+          <div className="py-1 text-center text-xs font-semibold text-slate-300">Сегодня</div>
 
           <div className="mt-3 flex flex-col gap-3 pb-10">
             {visible.map((m, idx) => {
@@ -159,9 +159,9 @@ export default function AIAssistantModal({ isOpen, onClose }: Props) {
                   <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-light shadow-vilka-soft">
                     <Utensils className="h-4 w-4 text-brand-dark" />
                   </div>
-                  <div className="max-w-[85%] rounded-2xl bg-white border border-border px-3 py-2 text-sm text-slate-900 whitespace-pre-wrap dark:bg-slate-600 dark:text-white dark:border-white/10">
+                  <div className="max-w-[85%] rounded-2xl bg-surface-soft px-3 py-2 text-sm text-slate-900 whitespace-pre-wrap">
                     {m.content}
-                    <div className="mt-1 text-right text-[11px] text-slate-500 dark:text-slate-400">{m.at}</div>
+                    <div className="mt-1 text-right text-[11px] text-slate-400">{m.at}</div>
                   </div>
                 </div>
               );
@@ -174,20 +174,20 @@ export default function AIAssistantModal({ isOpen, onClose }: Props) {
             <button
               type="button"
               onClick={scrollToBottom}
-              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-vilka-soft dark:bg-slate-600"
+              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-vilka-soft"
               title="Вниз"
             >
-              <ChevronDown className="h-4 w-4 text-slate-700 dark:text-slate-200" />
+              <ChevronDown className="h-4 w-4 text-slate-600" />
             </button>
           )}
         </div>
 
         {/* Input */}
         <div className="pt-4">
-          <div className="flex items-center gap-2 rounded-2xl bg-white border border-border px-3 py-2 dark:bg-slate-600 dark:border-white/10">
+          <div className="flex items-center gap-2 rounded-2xl bg-surface-soft px-3 py-2">
             <button
               type="button"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-500"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-white"
               title="Прикрепить"
               onClick={() => {}}
             >
@@ -201,7 +201,7 @@ export default function AIAssistantModal({ isOpen, onClose }: Props) {
               }}
               disabled={isSending}
               placeholder="Введите сообщение"
-              className="flex-1 bg-transparent px-1 text-sm text-slate-800 outline-none placeholder:text-slate-500 disabled:opacity-60 dark:text-slate-100 dark:placeholder:text-slate-400"
+              className="flex-1 bg-transparent px-1 text-sm text-slate-700 outline-none placeholder:text-slate-400 disabled:opacity-60"
             />
             <button
               type="button"
