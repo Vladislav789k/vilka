@@ -72,40 +72,7 @@ function CatalogUI({
   catalog,
   indexes,
 }: CatalogPageClientProps & { indexes: CatalogIndexes }) {
-  const { quantities, entries, totals, offerStocks, add, remove, reload: reloadCart, lastServerMessages } = useCart();
-
-  // #region agent log
-  useEffect(() => {
-    const logViewport = () => {
-      const width = window.innerWidth;
-      const sidebarEl = document.querySelector('aside[class*="hidden"]');
-      const computedWidth = sidebarEl ? window.getComputedStyle(sidebarEl).width : "unknown";
-      const gridEl = document.querySelector('div[class*="grid-cols"]');
-      const gridTemplate = gridEl ? window.getComputedStyle(gridEl).gridTemplateColumns : "unknown";
-      fetch("http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          location: "CatalogPageClient.tsx:69",
-          message: "Viewport and layout check",
-          data: {
-            viewportWidth: width,
-            sidebarWidth: computedWidth,
-            gridTemplate,
-            breakpoint: width >= 1280 ? "xl" : width >= 1024 ? "lg" : width >= 768 ? "md" : "sm",
-          },
-          timestamp: Date.now(),
-          sessionId: "debug-session",
-          runId: "run1",
-          hypothesisId: "A",
-        }),
-      }).catch(() => {});
-    };
-    logViewport();
-    window.addEventListener("resize", logViewport);
-    return () => window.removeEventListener("resize", logViewport);
-  }, []);
-  // #endregion
+  const { quantities, entries, totals, offerStocks, add, remove, removeLine, reload: reloadCart, lastServerMessages } = useCart();
 
   const [searchQuery, setSearchQuery] = useState("");
   // Search index is built for CARD TITLES (offer.menuItemName), not for categories/baseItems.
@@ -137,7 +104,7 @@ function CatalogUI({
     role: string;
     telegram?: { username?: string | null; firstName?: string | null; lastName?: string | null } | null;
   } | null>(null);
-  const [pendingAddOfferId, setPendingAddOfferId] = useState<number | null>(null);
+  const [pendingAddOfferId, setPendingAddOfferId] = useState<string | null>(null);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   // Важно: desktop и mobile хедеры одновременно в DOM (только CSS скрывает),
   // поэтому один ref на два элемента ломает "click outside" (закрывает меню до клика по пунктам).
@@ -422,7 +389,7 @@ function CatalogUI({
     if (e.key === "Escape") clearSearch();
   };
 
-  const handleAddToCart = (offerId: number) => {
+  const handleAddToCart = (offerId: string) => {
     if (!user) {
       setPendingAddOfferId(offerId);
       setIsAuthOpen(true);
@@ -450,6 +417,10 @@ function CatalogUI({
   const brandedOffers = offersForItem.filter((o) => !o.isAnonymous);
 
   const cartButtonLabel = totals.totalPrice > 0 ? `${totals.totalPrice} ₽` : "0 ₽";
+  const formatMoney = useMemo(() => new Intl.NumberFormat("ru-RU"), []);
+  const cartOldTotal = useMemo(() => {
+    return entries.reduce((sum, e) => sum + (e.lineOldPrice ?? e.lineTotal), 0);
+  }, [entries]);
 
   const currentCategory = categories.find((c) => c.id === activeCategoryId);
   const currentSubcategory = subcategories.find((s) => s.id === activeSubcategoryId);
@@ -620,7 +591,7 @@ function CatalogUI({
   }, [isProfileDropdownOpen]);
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-stone-200/70">
+    <main className="flex min-h-screen flex-col bg-stone-200/70">
       {isSearchFocused && (
         <div
           className="fixed inset-0 z-30 bg-black/45"
@@ -906,42 +877,9 @@ function CatalogUI({
         </div>
       </header>
 
-      <section className="flex min-h-0 w-full flex-1 flex-col overflow-hidden px-3 pt-3 md:px-4 md:pt-4">
-        <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-4 md:grid-cols-[64px_minmax(0,1fr)_320px] lg:grid-cols-[200px_minmax(0,1fr)_320px] xl:grid-cols-[240px_minmax(0,1fr)_320px]">
-          {/* #region agent log */}
-          <aside
-            ref={(el: HTMLElement | null) => {
-              if (el) {
-                const width = window.getComputedStyle(el).width;
-                const display = window.getComputedStyle(el).display;
-                const firstBtn = el.querySelector("button");
-                const btnTextVisible = firstBtn
-                  ? window.getComputedStyle(firstBtn.querySelector('span[class*="hidden"]') as Element).display !==
-                    "none"
-                  : false;
-                fetch("http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    location: "CatalogPageClient.tsx:399",
-                    message: "Sidebar render check",
-                    data: {
-                      sidebarWidth: width,
-                      display,
-                      textVisible: btnTextVisible,
-                      viewportWidth: window.innerWidth,
-                    },
-                    timestamp: Date.now(),
-                    sessionId: "debug-session",
-                    runId: "run1",
-                    hypothesisId: "A",
-                  }),
-                }).catch(() => {});
-              }
-            }}
-            className="hidden h-full w-full overflow-y-auto rounded-3xl bg-white shadow-vilka-soft md:block md:w-auto md:border md:border-slate-100"
-          >
-            {/* #endregion */}
+      <section className="w-full flex-1 px-3 pt-3 pb-5 md:px-4 md:pt-4 md:pb-7">
+        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[64px_minmax(0,1fr)_320px] lg:grid-cols-[200px_minmax(0,1fr)_320px] xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+          <aside className="hidden w-full self-start rounded-3xl bg-white shadow-vilka-soft md:sticky md:top-4 md:block md:w-auto md:max-h-[calc(100vh-2rem)] md:overflow-y-auto md:border md:border-slate-100 overscroll-contain">
             <div className="rounded-3xl bg-white p-2 md:p-3">
               <h2 className="hidden px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 lg:block">
                 Категории
@@ -960,32 +898,6 @@ function CatalogUI({
                         type="button"
                         onClick={() => handleCategoryClick(cat.id)}
                         title={cat.name}
-                        onMouseEnter={(e: { currentTarget: HTMLElement }) => {
-                          // #region agent log
-                          const el = e.currentTarget;
-                          const tooltipEl = window.getComputedStyle(el, "::after");
-                          const tooltipOpacity = tooltipEl.opacity;
-                          const viewportWidth = window.innerWidth;
-                          fetch("http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              location: "CatalogPageClient.tsx:416",
-                              message: "Tooltip hover check",
-                              data: {
-                                categoryName: cat.name,
-                                viewportWidth,
-                                tooltipOpacity,
-                                hasTooltipClass: el.classList.contains("tooltip-icon-only"),
-                              },
-                              timestamp: Date.now(),
-                              sessionId: "debug-session",
-                              runId: "run1",
-                              hypothesisId: "B",
-                            }),
-                          }).catch(() => {});
-                          // #endregion
-                        }}
                         className={[
                           "group flex w-full items-center justify-between rounded-2xl px-2 py-2 text-left transition",
                           "md:justify-center lg:justify-between",
@@ -995,72 +907,11 @@ function CatalogUI({
                             : "bg-white text-slate-800 hover:bg-surface-soft",
                         ].join(" ")}
                       >
-                        <span
-                          ref={(el: HTMLElement | null) => {
-                            // #region agent log
-                            if (el) {
-                              const justifyContent = window.getComputedStyle(el).justifyContent;
-                              const viewportWidth = window.innerWidth;
-                              fetch("http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  location: "CatalogPageClient.tsx:429",
-                                  message: "Icon container alignment check",
-                                  data: {
-                                    categoryName: cat.name,
-                                    justifyContent,
-                                    viewportWidth,
-                                    expectedCenter: viewportWidth >= 768 && viewportWidth < 1024,
-                                  },
-                                  timestamp: Date.now(),
-                                  sessionId: "debug-session",
-                                  runId: "run1",
-                                  hypothesisId: "D",
-                                }),
-                              }).catch(() => {});
-                            }
-                            // #endregion
-                          }}
-                          className="flex min-w-0 flex-1 items-center gap-2 lg:gap-3"
-                        >
+                        <span className="flex min-w-0 flex-1 items-center gap-2 lg:gap-3">
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-surface-soft text-lg md:h-10 md:w-10">
                             <CategoryEmoji code={cat.id} />
                           </span>
-                          <span
-                            ref={(el: HTMLElement | null) => {
-                              // #region agent log
-                              if (el) {
-                                const display = window.getComputedStyle(el).display;
-                                const width = window.getComputedStyle(el).width;
-                                const textEl = el.querySelector("span");
-                                const textWidth = textEl ? window.getComputedStyle(textEl).width : "unknown";
-                                const textOverflow = textEl ? window.getComputedStyle(textEl).textOverflow : "unknown";
-                                fetch("http://127.0.0.1:7242/ingest/fa8b72b8-bfd9-4262-93cd-9bb477f82934", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    location: "CatalogPageClient.tsx:433",
-                                    message: "Text visibility and truncation check",
-                                    data: {
-                                      categoryName: cat.name,
-                                      textContainerDisplay: display,
-                                      textContainerWidth: width,
-                                      textWidth,
-                                      textOverflow,
-                                      viewportWidth: window.innerWidth,
-                                    },
-                                    timestamp: Date.now(),
-                                    sessionId: "debug-session",
-                                    runId: "run1",
-                                    hypothesisId: "C",
-                                  }),
-                                }).catch(() => {});
-                              }
-                              // #endregion
-                            }}
-                            className="hidden min-w-0 flex-col lg:flex"
-                          >
+                          <span className="hidden min-w-0 flex-col lg:flex">
                             <span className="truncate text-sm leading-tight">{cat.name}</span>
                             {cat.isPromo && (
                               <span className="mt-0.5 truncate text-[10px] text-slate-500">
@@ -1110,7 +961,7 @@ function CatalogUI({
             </div>
           </aside>
 
-          <section className="flex min-w-0 flex-1 min-h-0 flex-col gap-3 overflow-y-auto rounded-3xl border border-slate-100 bg-white p-4 shadow-vilka-soft">
+          <section className="flex min-w-0 flex-col gap-3 rounded-3xl border border-slate-100 bg-white p-4 shadow-vilka-soft">
             {!isSearching && (
               <>
                 {/* Информационный блок */}
@@ -1341,9 +1192,9 @@ function CatalogUI({
               ) : null)}
           </section>
 
-          <aside className="hidden h-full w-full shrink-0 overflow-y-auto lg:block">
-            <div className="flex h-full flex-col gap-2 pb-4">
-              <div className="flex flex-1 flex-col rounded-3xl border border-slate-100 bg-stone-50/95 p-4 shadow-vilka-soft">
+          <aside className="hidden w-full shrink-0 self-start lg:sticky lg:top-4 lg:block">
+            <div className="flex flex-col gap-2 pb-4">
+              <div className="flex h-[calc(100vh-2rem)] min-h-0 flex-col rounded-3xl border border-slate-100 bg-stone-50/95 p-4 shadow-vilka-soft">
                 <h2 className="text-base font-semibold text-slate-900">Корзина</h2>
 
                 {lastServerMessages.length > 0 && (
@@ -1360,15 +1211,39 @@ function CatalogUI({
                   </div>
                 ) : (
                   <>
-                    <div className="mt-3 space-y-3">
-                      {entries.map(({ offer, quantity, lineTotal, lineOldPrice }) => {
-                        const isSoldOut =
-                          (((offerStocks[offer.id] ?? offer.stock) ?? 0) as number) <= 0;
-                        const base = baseItems.find((i) => i.id === offer.baseItemId);
-                        return (
-                          <div key={offer.id} className="flex flex-col gap-2 rounded-2xl border border-slate-100 p-3">
-                            <div className="flex items-start gap-3">
-                              <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-surface-soft">
+                    {/* hard divider above items list */}
+                    <div className="mt-3 h-px bg-slate-200/80" />
+                    {/* Scroll happens only inside the items list */}
+                    <div className="relative mt-3 min-h-0 flex-1">
+                      <div
+                        className="h-full min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1 pb-2"
+                        style={{
+                          WebkitMaskImage:
+                            "linear-gradient(to bottom, rgba(0,0,0,1) 0px, rgba(0,0,0,1) calc(100% - 34px), transparent 100%)",
+                          maskImage:
+                            "linear-gradient(to bottom, rgba(0,0,0,1) 0px, rgba(0,0,0,1) calc(100% - 34px), transparent 100%)",
+                        }}
+                      >
+                        {entries.map(({ offer, quantity, lineTotal, lineOldPrice }) => {
+                          const isSoldOut =
+                            (((offerStocks[offer.id] ?? offer.stock) ?? 0) as number) <= 0;
+                          const base = baseItems.find((i) => i.id === offer.baseItemId);
+                          return (
+                            <div
+                              key={offer.id}
+                              className="group relative flex items-start gap-4 rounded-3xl bg-white p-3"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => removeLine(offer.id)}
+                                className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-slate-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-slate-100 hover:text-slate-600"
+                                aria-label="Удалить"
+                                title="Удалить"
+                              >
+                                <span className="text-xl leading-none">×</span>
+                              </button>
+
+                              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-3xl bg-surface-soft">
                                 {offer.imageUrl ? (
                                   // eslint-disable-next-line @next/next/no-img-element
                                   <img
@@ -1383,122 +1258,76 @@ function CatalogUI({
                                 )}
                               </div>
 
-                              <div className="flex min-w-0 flex-1 flex-col">
-                                <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+                              <div className="min-w-0 flex-1 pr-10">
+                                <div className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900">
                                   {offer.menuItemName}
                                 </div>
 
-                                {base?.description && (
-                                  <div className="mt-0.5 text-[11px] text-slate-500">{base.description}</div>
-                                )}
-
-                                <div className="mt-2 flex items-center justify-between rounded-full bg-surface-soft px-3 py-1.5">
-                                  {/* Анимация нажатия на +/- */}
-                                  <div className="[&_button]:transform-gpu [&_button]:transition-transform [&_button]:duration-100 [&_button]:ease-out [&_button]:active:scale-95">
-                                    <QuantityControls
-                                      quantity={quantity}
-                                      onAdd={() => handleAddToCart(offer.id)}
-                                      onRemove={() => remove(offer.id)}
-                                      canAdd={!isSoldOut}
-                                      size="sm"
-                                    />
+                                <div className="mt-3 flex items-center justify-between gap-3">
+                                  <div className="inline-flex items-center gap-3 rounded-full border border-slate-300 bg-white px-3 py-1.5">
+                                    <button
+                                      type="button"
+                                      className="flex h-4 w-4 items-center justify-center text-slate-600 disabled:opacity-40"
+                                      onClick={() => remove(offer.id)}
+                                      aria-label="Уменьшить количество"
+                                      disabled={quantity <= 0}
+                                    >
+                                      <span className="text-xl leading-none">−</span>
+                                    </button>
+                                    <span className="min-w-[18px] text-center text-sm font-semibold text-slate-800 tabular-nums">
+                                      {quantity}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="flex h-4 w-4 items-center justify-center text-slate-600 disabled:opacity-40"
+                                      onClick={() => handleAddToCart(offer.id)}
+                                      aria-label="Увеличить количество"
+                                      disabled={isSoldOut}
+                                    >
+                                      <span className="text-xl leading-none">+</span>
+                                    </button>
                                   </div>
 
-                                  <div className="flex items-center gap-2">
-                                    {lineOldPrice && (
-                                      <span className="text-xs text-slate-400 line-through">{lineOldPrice} ₽</span>
+                                  <div className="flex max-w-[120px] flex-col items-end gap-0.5 text-right">
+                                    {lineOldPrice ? (
+                                      <div className="whitespace-nowrap text-xs font-semibold text-slate-300 line-through tabular-nums">
+                                        {formatMoney.format(lineOldPrice)}
+                                      </div>
+                                    ) : (
+                                      <div className="h-4" />
                                     )}
-                                    <span className="text-sm font-semibold text-slate-900">{lineTotal} ₽</span>
+                                    <span className="w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold text-slate-900 tabular-nums">
+                                      {formatMoney.format(lineTotal)}{"\u00A0"}₽
+                                    </span>
                                   </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
+
+                      {/* fog overlay (helps the fade look more like "mist") */}
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-stone-50/95 to-transparent" />
                     </div>
 
-                    <div className="mt-4 border-t border-slate-100 pt-3">
-                      <div className="text-center text-xs text-slate-500">Итого</div>
-                      <div className="text-center text-2xl font-semibold leading-tight text-slate-900">
-                        {totals.totalPrice} ₽
-                      </div>
-                      <button className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-brand px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand/30 hover:bg-brand-dark active:scale-[0.98] transition-transform transform-gpu">
-                        Продолжить
+                    <div className="relative mt-4 pt-4">
+                      <button
+                        type="button"
+                        className="vilka-btn-primary inline-flex w-full flex-nowrap items-center justify-center gap-2 whitespace-nowrap rounded-[28px] px-6 py-5 text-base font-semibold shadow-lg shadow-black/10 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 active:scale-[0.98] transform-gpu"
+                      >
+                        <span>Продолжить</span>
+                        <span className="opacity-90">·</span>
+                        <span className="tabular-nums">{formatMoney.format(totals.totalPrice)}{"\u00A0"}₽</span>
+                        {cartOldTotal > totals.totalPrice ? (
+                          <span className="tabular-nums text-sm font-medium text-white/70 line-through">
+                            {formatMoney.format(cartOldTotal)}{"\u00A0"}₽
+                          </span>
+                        ) : null}
                       </button>
                     </div>
                   </>
                 )}
-              </div>
-
-              {totals.totalCount > 0 && (
-                <div className="rounded-3xl bg-stone-50/90 p-3 shadow-vilka-soft">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="save-cart-name"
-                        type="text"
-                        placeholder="Например: Обед в офис"
-                        className="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
-                        onChange={() => {}}
-                      />
-                      <button
-                        type="button"
-                        className="rounded-2xl bg-brand px-3 py-2 text-sm font-semibold text-white hover:bg-brand-dark active:scale-95 transition-transform transform-gpu"
-                        onClick={async () => {
-                          const nameInput = document.getElementById("save-cart-name") as HTMLInputElement | null;
-                          const name = nameInput?.value?.trim();
-                          if (!name) return;
-                          try {
-                            await fetch("/api/cart/save", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ cartId: 1, userId: 1, name }),
-                            });
-                          } catch (e) {
-                            console.error("save cart failed", e);
-                          }
-                        }}
-                      >
-                        Сохранить сет
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="apply-saved-id"
-                        type="number"
-                        placeholder="ID сохранённого сета"
-                        className="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
-                      />
-                      <button
-                        type="button"
-                        className="rounded-2xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 hover:border-slate-300 active:scale-95 transition-transform transform-gpu"
-                        onClick={async () => {
-                          const input = document.getElementById("apply-saved-id") as HTMLInputElement | null;
-                          const id = input?.value;
-                          if (!id) return;
-                          try {
-                            await fetch("/api/cart/apply-saved", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ savedCartId: Number(id) }),
-                            });
-                          } catch (e) {
-                            console.error("apply saved failed", e);
-                          }
-                        }}
-                      >
-                        Повторить сет
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 shadow-vilka-soft">
-                <p className="font-semibold text-slate-800">Вилка пока не везде</p>
-                <p className="mt-1">Укажите адрес, чтобы увидеть заведения, которые доставляют именно к вам.</p>
               </div>
             </div>
           </aside>

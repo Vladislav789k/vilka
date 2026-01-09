@@ -15,6 +15,7 @@ type CartContextValue = {
   offerStocks: Record<OfferId, number | undefined>;
   add: (offerId: OfferId) => void;
   remove: (offerId: OfferId) => void;
+  removeLine: (offerId: OfferId) => void;
   reload: () => Promise<void>;
   lastServerMessages: string[];
 };
@@ -349,6 +350,11 @@ export function CartProvider({ offers, children }: CartProviderProps) {
     setCart((prev) => updateCartQuantity(prev, offerId, 1));
   const remove = (offerId: OfferId) =>
     setCart((prev) => updateCartQuantity(prev, offerId, -1));
+  const removeLine = (offerId: OfferId) =>
+    setCart((prev) => {
+      const { [offerId]: _removed, ...rest } = prev;
+      return rest;
+    });
   const reload = async () => loadCartFromServer.current({ mergeIfHasExisting: false });
 
   const entries = useMemo(() => buildCartEntries(cart, offers), [cart, offers]);
@@ -363,6 +369,7 @@ export function CartProvider({ offers, children }: CartProviderProps) {
       offerStocks,
       add,
       remove,
+      removeLine,
       reload,
       lastServerMessages,
     }),
