@@ -50,6 +50,11 @@ const AddressModalContent = ({
   const geocodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const suggestTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isManualGeocodeRef = useRef(false); // Флаг, чтобы не вызывать геокодирование при программном обновлении полей
+  const geoRequestedRef = useRef(false);
+  const geoWatchIdRef = useRef<number | null>(null);
+  const [geoStatus, setGeoStatus] = useState<
+    "idle" | "requesting" | "granted" | "denied" | "unavailable" | "timeout" | "insecure"
+  >("idle");
   const cityInputRef = useRef<HTMLInputElement | null>(null);
   const streetInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -87,6 +92,14 @@ const AddressModalContent = ({
       setShowCitySuggestions(false);
       setShowStreetSuggestions(false);
       setCurrentStep("city");
+      geoRequestedRef.current = false;
+      if (geoWatchIdRef.current != null && typeof navigator !== "undefined" && "geolocation" in navigator) {
+        try {
+          navigator.geolocation.clearWatch(geoWatchIdRef.current);
+        } catch {}
+        geoWatchIdRef.current = null;
+      }
+      setGeoStatus("idle");
       loadAddresses();
     }
   }, [isOpen, loadAddresses]);
@@ -472,6 +485,112 @@ const AddressModalContent = ({
     }
   }, [ymaps]);
 
+  // Запрос геопозиции у пользователя и подстановка в карту/поля
+  const requestAndApplyGeolocation = useCallback(() => {
+    if (geoStatus === "requesting") return;
+    if (geoRequestedRef.current) return;
+
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      // Geolocation generally requires HTTPS (localhost is treated as secure).
+      setGeoStatus("insecure");
+      return;
+    }
+
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      setGeoStatus("unavailable");
+      return;
+    }
+
+    geoRequestedRef.current = true;
+    setGeoStatus("requesting");
+
+    // If permission is already granted, prefer watchPosition (more reliable on some devices)
+    // and stop after the first successful fix.
+    const perms = (navigator as any).permissions;
+    if (perms?.query) {
+      perms
+        .query({ name: "geolocation" })
+        .then((p: any) => {
+          if (p?.state === "denied") {
+            setGeoStatus("denied");
+            return;
+          }
+
+          if (p?.state === "granted" && geoWatchIdRef.current == null) {
+            try {
+              const watchId = navigator.geolocation.watchPosition(
+                (pos) => {
+                  const next: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+                  setGeoStatus("granted");
+                  setCoords(next);
+                  if (mapRef.current) mapRef.current.setCenter(next, 16);
+                  handleReverseGeocode(next);
+                  if (geoWatchIdRef.current != null) {
+                    navigator.geolocation.clearWatch(geoWatchIdRef.current);
+                    geoWatchIdRef.current = null;
+                  }
+                },
+                (err) => {
+                  console.warn("[AddressModal] watchPosition error:", err);
+                  // If watch fails, we'll rely on getCurrentPosition below.
+                  if (geoWatchIdRef.current != null) {
+                    navigator.geolocation.clearWatch(geoWatchIdRef.current);
+                    geoWatchIdRef.current = null;
+                  }
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+              );
+              geoWatchIdRef.current = watchId;
+            } catch {}
+          }
+        })
+        .catch(() => {});
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const next: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        setGeoStatus("granted");
+        setCoords(next);
+
+        // Обновляем центр карты и приближаем
+        if (mapRef.current) {
+          mapRef.current.setCenter(next, 16);
+        }
+
+        // Подставляем адрес в поля (если API карт уже готово)
+        handleReverseGeocode(next);
+      },
+      (err) => {
+        // Не блокируем пользователя — просто продолжаем без геопозиции
+        console.warn("[AddressModal] Geolocation error:", err);
+        if (err.code === err.PERMISSION_DENIED) {
+          setGeoStatus("denied");
+          // keep geoRequestedRef=true to avoid repeated browser prompts
+          return;
+        }
+
+        // Allow retry on transient errors (timeout / unavailable)
+        // But user wants auto-detect: if permission is already granted, we keep watching;
+        // otherwise we'll just show the message and user can pick on the map.
+        geoRequestedRef.current = true;
+        setGeoStatus(err.code === err.TIMEOUT ? "timeout" : "unavailable");
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 60_000,
+      }
+    );
+  }, [geoStatus, handleReverseGeocode]);
+
+  // Когда пользователь начинает добавлять адрес — запрашиваем геопозицию один раз
+  useEffect(() => {
+    if (!isOpen) return;
+    if (step !== "add") return;
+    requestAndApplyGeolocation();
+  }, [isOpen, step, requestAndApplyGeolocation]);
+
   // Обработчик клика на карту
   const handleMapClick = useCallback((event: any) => {
     if (!ymaps || !event) return;
@@ -661,6 +780,25 @@ const AddressModalContent = ({
             <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
               {/* Карта */}
               <div className="relative h-72 rounded-3xl">
+                  {(geoStatus === "requesting" ||
+                    geoStatus === "denied" ||
+                    geoStatus === "unavailable" ||
+                    geoStatus === "timeout" ||
+                    geoStatus === "insecure") && (
+                    <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-24px)] rounded-2xl bg-white/90 px-3 py-2 text-[11px] text-slate-700 shadow-vilka-soft">
+                      <div>
+                        {geoStatus === "requesting"
+                          ? "Определяем ваше местоположение…"
+                          : geoStatus === "denied"
+                          ? "Доступ к геопозиции запрещён — можно выбрать точку на карте вручную."
+                          : geoStatus === "timeout"
+                          ? "Не удалось получить геопозицию (таймаут). Можно выбрать точку на карте вручную."
+                          : geoStatus === "insecure"
+                          ? "Геопозиция требует HTTPS (или localhost). Можно выбрать точку на карте вручную."
+                          : "Геопозиция недоступна — можно выбрать точку на карте вручную."}
+                      </div>
+                    </div>
+                  )}
                   <Map
                     instanceRef={(ref: any) => {
                       mapRef.current = ref;
@@ -691,6 +829,7 @@ const AddressModalContent = ({
                         value={city}
                         onChange={(e: { target: { value: string } }) => handleCityChange(e.target.value)}
                         onFocus={() => {
+                          requestAndApplyGeolocation();
                           if (city.length >= 2) {
                             setShowCitySuggestions(true);
                           }
@@ -747,6 +886,7 @@ const AddressModalContent = ({
                         value={street}
                         onChange={(e: { target: { value: string } }) => handleStreetChange(e.target.value)}
                         onFocus={() => {
+                          requestAndApplyGeolocation();
                           if (street.length >= 2 && city) {
                             setShowStreetSuggestions(true);
                           }
