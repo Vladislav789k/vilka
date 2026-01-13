@@ -657,186 +657,220 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
         </div>
       )}
 
-      <header ref={headerRef} className="shrink-0 z-40 border-b border-slate-200/70 bg-stone-50/80 backdrop-blur">
-        {/* desktop */}
-        <div className="hidden md:block">
-          <div className="border-b border-slate-200/70 bg-stone-50/80 backdrop-blur">
-            <div className="flex w-full items-center gap-4 px-4 py-3">
-              <Link href="/" onClick={handleLogoClick} className="flex items-center gap-1 transition hover:opacity-80">
-                <div className="relative h-18 w-18 shrink-0">
-                  <Image src="/logo.png" alt="Вилка" fill priority sizes="72px" className="object-contain" />
-                </div>
-                <div className="flex flex-col leading-tight">
-                  <span className="text-lg font-semibold text-slate-900">Вилка</span>
-                  <span className="text-xs text-slate-600">Еда из ресторанов и пекарен</span>
-                </div>
-              </Link>
+<header ref={headerRef} className="sticky top-0 z-40 bg-transparent">
+  {/* ===== DESKTOP ===== */}
+  <div className="hidden md:block">
+    {/* Полоса шапки НА ВСЮ ШИРИНУ, без отступа сверху, скругление только снизу */}
+    <div className="mx-auto w-[calc(100%-24px)] rounded-b-[28px] bg-white/95 shadow-vilka-soft ring-1 ring-black/5 backdrop-blur md:w-[calc(100%-32px)]">
 
-              <div className="hidden flex-1 items-center md:flex">
-                <div ref={searchAnchorRefDesktop} className="relative w-full">
-                  <div
-                    className={[
-                      "w-full overflow-hidden shadow-vilka-soft transition-colors",
-                      isSearchFocused && searchSuggestions.length > 0
-                        ? "rounded-t-2xl rounded-b-none border border-slate-200 bg-white"
-                        : "rounded-full bg-surface-soft",
-                    ].join(" ")}
-                  >
-                    <div className="flex w-full items-center gap-3 px-4 py-2">
-                      <Search className="h-4 w-4 text-slate-500" />
-                      <input
-                        type="text"
-                        placeholder="Найти ресторан или блюдо..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyDown={handleSearchKeyDown}
-                        onFocus={() => {
-                          activeSearchAnchorElRef.current = searchAnchorRefDesktop.current;
-                          updateSearchAnchorRect(searchAnchorRefDesktop.current);
-                          setIsSearchFocused(true);
-                        }}
-                        onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
-                        className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="ml-auto flex items-center gap-3">
-                {user && (
-                  <button
-                    type="button"
-                    onClick={() => setIsAssistantOpen(true)}
-                    className="hidden h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
-                    aria-label="Чат-бот"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" />
-                  </button>
-                )}
-
-                {user && (
-                  <button
-                    type="button"
-                    onClick={() => setIsAddressOpen(true)}
-                    className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
-                  >
-                    <MapPin className="h-3.5 w-3.5" />
-                    <span className="max-w-[220px] truncate">{currentAddressLabel}</span>
-                  </button>
-                )}
-
-                {user ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsProfileOpen(true)}
-                    className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
-                  >
-                    <User className="h-3.5 w-3.5" />
-                    <span>Профиль</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsAuthOpen(true)}
-                    className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900 md:flex"
-                  >
-                    <User className="h-3.5 w-3.5" />
-                    <span>Войти</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* mobile */}
-        <div className="md:hidden">
-          <div className="flex w-full items-center gap-3 bg-white px-3 pt-3 pb-2">
-            <Link href="/" onClick={handleLogoClick} className="flex items-center gap-2 transition hover:opacity-80">
-              <div className="relative h-16 w-16 shrink-0">
-                <Image src="/logo.png" alt="Вилка" fill priority sizes="64px" className="object-contain" />
-              </div>
-            </Link>
-
-            {user && (
-              <button
-                type="button"
-                onClick={() => setIsAddressOpen(true)}
-                className="flex flex-1 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
-              >
-                <MapPin className="h-3.5 w-3.5" />
-                <span className="truncate">{currentAddressLabel}</span>
-              </button>
-            )}
-
-            {user ? (
-              <button
-                type="button"
-                onClick={() => setIsProfileOpen(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
-                aria-label="Профиль"
-              >
-                <User className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsAuthOpen(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
-                aria-label="Войти"
-              >
-                <User className="h-4 w-4" />
-              </button>
-            )}
-
-            {user && (
-              <button
-                type="button"
-                onClick={() => setIsAssistantOpen(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
-                title="Чат-бот"
-                aria-label="Чат-бот"
-              >
-                <MessageCircle className="h-4 w-4" />
-              </button>
-            )}
+      {/* Контент центрируем, но сама шапка длинная */}
+      <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-6 py-3">
+        {/* logo */}
+        <Link
+          href="/"
+          onClick={handleLogoClick}
+          className="flex items-center gap-2 rounded-full px-2 py-1 transition hover:bg-slate-50"
+        >
+          <div className="relative h-12 w-12 shrink-0">
+            <Image src="/logo.png" alt="Вилка" fill priority sizes="48px" className="object-contain" />
           </div>
 
-          <div className="sticky top-0 z-30 bg-stone-50/95 backdrop-blur">
-            <div className="px-3 pb-2">
-              <div ref={searchAnchorRefMobile} className="relative w-full">
-                <div
-                  className={[
-                    "w-full overflow-hidden shadow-vilka-soft transition-colors",
-                    isSearchFocused && searchSuggestions.length > 0
-                      ? "rounded-t-2xl rounded-b-none border border-slate-200 bg-white"
-                      : "rounded-full bg-surface-soft",
-                  ].join(" ")}
+          <div className="flex flex-col leading-tight">
+            <span className="text-base font-semibold text-slate-900">Вилка</span>
+            <span className="hidden lg:block text-xs text-slate-500">Еда из ресторанов и пекарен</span>
+          </div>
+        </Link>
+
+        {/* search (как у Самоката: серый “пилюля”, без явной рамки) */}
+        <div className="flex-1">
+          <div ref={searchAnchorRefDesktop} className="relative w-full">
+            <div
+              className={[
+                "flex w-full items-center gap-3 rounded-full px-4 py-2.5",
+                "bg-slate-100/80",
+                "ring-1 ring-transparent",
+                "focus-within:ring-2 focus-within:ring-emerald-500/40",
+                isSearchFocused && searchSuggestions.length > 0 ? "rounded-b-none" : "",
+              ].join(" ")}
+            >
+              <Search className="h-4 w-4 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Найти ресторан или блюдо..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                onFocus={() => {
+                  activeSearchAnchorElRef.current = searchAnchorRefDesktop.current;
+                  updateSearchAnchorRect(searchAnchorRefDesktop.current);
+                  setIsSearchFocused(true);
+                }}
+                onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
+              />
+
+              {searchQuery.trim() && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200"
+                  aria-label="Очистить поиск"
                 >
-                  <div className="flex w-full items-center gap-3 px-4 py-2">
-                    <Search className="h-4 w-4 text-slate-500" />
-                    <input
-                      type="text"
-                      placeholder="Найти ресторан или блюдо..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={handleSearchKeyDown}
-                      onFocus={() => {
-                        activeSearchAnchorElRef.current = searchAnchorRefMobile.current;
-                        updateSearchAnchorRect(searchAnchorRefMobile.current);
-                        setIsSearchFocused(true);
-                      }}
-                      onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
-                      className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
-                    />
-                  </div>
-                </div>
-              </div>
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>
-      </header>
+
+        {/* right actions (тоже “пилюли” как у Самоката) */}
+        <div className="ml-auto flex items-center gap-2">
+          {user && (
+            <button
+              type="button"
+              onClick={() => setIsAssistantOpen(true)}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100/80 text-slate-700 hover:bg-slate-200"
+              aria-label="Чат-бот"
+            >
+              <MessageCircle className="h-4 w-4" />
+            </button>
+          )}
+
+          {user && (
+            <button
+              type="button"
+              onClick={() => setIsAddressOpen(true)}
+              className="inline-flex h-11 items-center gap-2 rounded-full bg-slate-100/80 px-4 text-sm font-medium text-slate-800 hover:bg-slate-200"
+            >
+              <MapPin className="h-4 w-4 text-slate-600" />
+              <span className="max-w-[240px] truncate">{currentAddressLabel}</span>
+            </button>
+          )}
+
+          {user ? (
+            <button
+              type="button"
+              onClick={() => setIsProfileOpen(true)}
+              className="inline-flex h-11 items-center gap-2 rounded-full bg-slate-100/80 px-4 text-sm font-medium text-slate-800 hover:bg-slate-200"
+            >
+              <User className="h-4 w-4 text-slate-600" />
+              <span>Профиль</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsAuthOpen(true)}
+              className="inline-flex h-11 items-center gap-2 rounded-full bg-slate-100/80 px-4 text-sm font-medium text-slate-800 hover:bg-slate-200"
+            >
+              <User className="h-4 w-4 text-slate-600" />
+              <span>Войти</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {/* ===== MOBILE ===== */}
+  <div className="md:hidden">
+  <div className="mx-auto w-[calc(100%-20px)] rounded-b-[24px] bg-white/95 shadow-vilka-soft ring-1 ring-black/5 backdrop-blur">
+
+      <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+        <Link href="/" onClick={handleLogoClick} className="flex items-center gap-2">
+          <div className="relative h-11 w-11 shrink-0">
+            <Image src="/logo.png" alt="Вилка" fill priority sizes="44px" className="object-contain" />
+          </div>
+        </Link>
+
+        {user && (
+          <button
+            type="button"
+            onClick={() => setIsAddressOpen(true)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-slate-100/80 px-3 py-2 text-[12px] font-medium text-slate-800 hover:bg-slate-200"
+          >
+            <MapPin className="h-4 w-4 text-slate-600" />
+            <span className="truncate">{currentAddressLabel}</span>
+          </button>
+        )}
+
+        {user ? (
+          <button
+            type="button"
+            onClick={() => setIsProfileOpen(true)}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100/80 text-slate-700 hover:bg-slate-200"
+            aria-label="Профиль"
+          >
+            <User className="h-4 w-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsAuthOpen(true)}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100/80 text-slate-700 hover:bg-slate-200"
+            aria-label="Войти"
+          >
+            <User className="h-4 w-4" />
+          </button>
+        )}
+
+        {user && (
+          <button
+            type="button"
+            onClick={() => setIsAssistantOpen(true)}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100/80 text-slate-700 hover:bg-slate-200"
+            aria-label="Чат-бот"
+          >
+            <MessageCircle className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      <div className="px-4 pb-4">
+        <div ref={searchAnchorRefMobile} className="relative w-full">
+          <div
+            className={[
+              "flex w-full items-center gap-3 rounded-full px-4 py-2.5",
+              "bg-slate-100/80",
+              "ring-1 ring-transparent",
+              "focus-within:ring-2 focus-within:ring-emerald-500/40",
+              isSearchFocused && searchSuggestions.length > 0 ? "rounded-b-none" : "",
+            ].join(" ")}
+          >
+            <Search className="h-4 w-4 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Найти ресторан или блюдо..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              onFocus={() => {
+                activeSearchAnchorElRef.current = searchAnchorRefMobile.current;
+                updateSearchAnchorRect(searchAnchorRefMobile.current);
+                setIsSearchFocused(true);
+              }}
+              onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+              className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
+            />
+
+            {searchQuery.trim() && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200"
+                aria-label="Очистить поиск"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+
+
 
       <div ref={pageScrollRef} className="flex-1 overflow-y-auto bg-[var(--vilka-bg)]">
         <section className="w-full px-3 pt-3 pb-5 md:px-4 md:pt-4 md:pb-7">
