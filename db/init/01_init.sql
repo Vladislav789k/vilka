@@ -989,7 +989,13 @@ CREATE TABLE public.user_addresses (
     longitude double precision,
     is_default boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    comment text
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    comment text,
+    apartment text,
+    entrance text,
+    floor text,
+    intercom text,
+    door_code_extra text
 );
 
 
@@ -1650,7 +1656,7 @@ COPY public.restaurant_cuisines (restaurant_id, cuisine_id) FROM stdin;
 --
 
 COPY public.restaurants (id, owner_user_id, name, description, address_line, city, latitude, longitude, min_order_amount, delivery_fee, is_active, status, rating_avg, rating_count, settings, created_at, updated_at, business_access_code) FROM stdin;
-3	2	Рестик 1	Ресторан с выпечкой	\N	\N	\N	\N	0.00	0.00	t	pending	0.00	0	\N	2025-11-28 08:39:23.327122+00	2025-11-28 08:39:23.327122+00	123
+3	2	Рестик 1	Ресторан с выпечкой	\N	Москва	55.743015	37.548950	0.00	0.00	t	pending	0.00	0	{"contact_email":"misha.smirnov.2001@mail.ru","contact_phone":"+79161525095"}	2025-11-28 08:39:23.327122+00	2025-11-28 08:39:23.327122+00	123
 \.
 
 
@@ -1707,7 +1713,7 @@ COPY public.user_profiles (user_id, full_name, avatar_url, birthday, gender, pre
 --
 
 COPY public.users (id, email, phone, password_hash, role, is_active, created_at, updated_at, phone_verified, phone_verified_at) FROM stdin;
-2	\N	79161525095	\N	admin	t	2025-11-28 08:39:16.669769+00	2025-11-28 08:39:16.669769+00	f	\N
+2	misha.smirnov.2001@mail.ru	+79161525095	\N	admin	t	2025-11-28 08:39:16.669769+00	2025-11-28 08:39:16.669769+00	f	\N
 \.
 
 

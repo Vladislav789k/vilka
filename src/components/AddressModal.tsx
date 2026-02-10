@@ -1,497 +1,335 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { ArrowLeft, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 import { YMaps, Map, Placemark, useYMaps } from "@iminside/react-yandex-maps";
-
-type Address = {
-  id: number;
-  label: string | null;
-  address_line: string;
-  city: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  is_default: boolean;
-  comment: string | null;
-};
 
 type AddressModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onSelectAddress: (label: string) => void;
+  onSelectAddress: (address: {
+    id: number;
+    label: string;
+    city: string;
+    latitude: number;
+    longitude: number;
+  }) => void;
 };
 
-// Внутренний компонент, который использует useYMaps внутри YMaps провайдера
-const AddressModalContent = ({
-  isOpen,
-  onClose,
-  onSelectAddress,
-}: AddressModalProps) => {
-  const [step, setStep] = useState<"list" | "add">("list");
-  const [addresses, setAddresses] = useState<Address[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+const ANIM_MS = 500;
 
+function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalProps) {
   const [city, setCity] = useState("");
   const [street, setStreet] = useState("");
+
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [streetSuggestions, setStreetSuggestions] = useState<string[]>([]);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
   const [showStreetSuggestions, setShowStreetSuggestions] = useState(false);
-  const [selectedCityCoords, setSelectedCityCoords] = useState<[number, number] | null>(null);
-  const [currentStep, setCurrentStep] = useState<"city" | "street">("city"); // Текущий шаг ввода
 
-  const [coords, setCoords] = useState<[number, number]>([
-    55.7558, // Москва по умолчанию
-    37.6173,
-  ]);
+  const [coords, setCoords] = useState<[number, number]>([55.7558, 37.6173]); // Москва по умолчанию
 
-  const mapRef = useRef<any>(null);
-  const geocodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const suggestTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isManualGeocodeRef = useRef(false); // Флаг, чтобы не вызывать геокодирование при программном обновлении полей
-  const geoRequestedRef = useRef(false);
-  const geoWatchIdRef = useRef<number | null>(null);
-  const [geoStatus, setGeoStatus] = useState<
-    "idle" | "requesting" | "granted" | "denied" | "unavailable" | "timeout" | "insecure"
-  >("idle");
   const cityInputRef = useRef<HTMLInputElement | null>(null);
   const streetInputRef = useRef<HTMLInputElement | null>(null);
 
-  // хук из библиотеки, чтобы иметь доступ к ymaps API после загрузки
+  const mapRef = useRef<any>(null);
+  const geocodeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isManualGeocodeRef = useRef(false);
+
+  const geoRequestedRef = useRef(false);
+  const geoWatchIdRef = useRef<number | null>(null);
+
+  const [geoStatus, setGeoStatus] = useState<
+    "idle" | "requesting" | "granted" | "denied" | "unavailable" | "timeout" | "insecure"
+  >("idle");
+
   const ymaps = useYMaps(["geocode", "suggest"]);
 
-  // Загрузка адресов из БД
-  const loadAddresses = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch("/api/addresses");
-      if (res.ok) {
-        const data = await res.json();
-        setAddresses(data.addresses || []);
-        if (data.addresses && data.addresses.length > 0) {
-          const defaultAddr = data.addresses.find((a: Address) => a.is_default) || data.addresses[0];
-          setSelectedId(defaultAddr.id);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to load addresses:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // reset при открытии
   useEffect(() => {
-    if (isOpen) {
-      setStep("list");
-      setCity("");
-      setStreet("");
-      setSelectedCityCoords(null);
-      setCitySuggestions([]);
-      setStreetSuggestions([]);
-      setShowCitySuggestions(false);
-      setShowStreetSuggestions(false);
-      setCurrentStep("city");
-      geoRequestedRef.current = false;
-      if (geoWatchIdRef.current != null && typeof navigator !== "undefined" && "geolocation" in navigator) {
-        try {
-          navigator.geolocation.clearWatch(geoWatchIdRef.current);
-        } catch {}
-        geoWatchIdRef.current = null;
-      }
-      setGeoStatus("idle");
-      loadAddresses();
-    }
-  }, [isOpen, loadAddresses]);
+    if (!isOpen) return;
 
-  // Проверка, содержит ли адрес дом (число в адресе)
+    setCity("");
+    setStreet("");
+    setCitySuggestions([]);
+    setStreetSuggestions([]);
+    setShowCitySuggestions(false);
+    setShowStreetSuggestions(false);
+    setCoords([55.7558, 37.6173]);
+
+    geoRequestedRef.current = false;
+
+    if (geoWatchIdRef.current != null && typeof navigator !== "undefined" && "geolocation" in navigator) {
+      try {
+        navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      } catch {}
+      geoWatchIdRef.current = null;
+    }
+
+    setGeoStatus("idle");
+
+    setTimeout(() => cityInputRef.current?.focus(), 0);
+  }, [isOpen]);
+
   const hasHouseNumber = (address: string): boolean => {
     if (!address.trim()) return false;
-    // Проверяем наличие чисел или паттернов типа "д.", "дом", "к.", "корп."
     const housePattern = /\d+|д\.|дом|к\.|корп\.|лит\.|стр\./i;
     return housePattern.test(address);
   };
 
-  // Проверка доступности Yandex Maps API
-  useEffect(() => {
-    if (step === "add" && ymaps === null) {
-      console.warn("Yandex Maps API is not loaded yet. Waiting for initialization...");
-    } else if (step === "add" && ymaps) {
-      console.log("Yandex Maps API is ready");
-    }
-  }, [ymaps, step]);
+  // --------- Clear buttons ----------
+  const clearCity = useCallback(() => {
+    setCity("");
+    setCitySuggestions([]);
+    setShowCitySuggestions(false);
+    setTimeout(() => cityInputRef.current?.focus(), 0);
+  }, []);
 
-  // Функция для получения подсказок городов
-  const fetchCitySuggestions = useCallback((query: string) => {
-    if (!ymaps || !query.trim() || query.length < 2) {
-      setCitySuggestions([]);
-      setShowCitySuggestions(false);
-      return;
-    }
+  const clearStreet = useCallback(() => {
+    setStreet("");
+    setStreetSuggestions([]);
+    setShowStreetSuggestions(false);
+    setTimeout(() => streetInputRef.current?.focus(), 0);
+  }, []);
 
-    // Очищаем предыдущий таймаут
-    if (suggestTimeoutRef.current) {
-      clearTimeout(suggestTimeoutRef.current);
-    }
+  // --------- Suggest (город) ----------
+  const fetchCitySuggestions = useCallback(
+    (query: string) => {
+      if (!ymaps || !query.trim() || query.length < 2) {
+        setCitySuggestions([]);
+        setShowCitySuggestions(false);
+        return;
+      }
 
-    suggestTimeoutRef.current = setTimeout(() => {
-      // Используем геокодирование для поиска городов
-      ymaps
-        ?.geocode(query, { results: 10 })
-        .then((res: any) => {
-          if (res && res.geoObjects) {
+      if (suggestTimeoutRef.current) clearTimeout(suggestTimeoutRef.current);
+
+      suggestTimeoutRef.current = setTimeout(() => {
+        ymaps
+          ?.geocode(query, { results: 10 })
+          .then((res: any) => {
+            if (!res?.geoObjects) {
+              setCitySuggestions([]);
+              setShowCitySuggestions(false);
+              return;
+            }
+
             const suggestions: string[] = [];
             res.geoObjects.each((geoObject: any) => {
               const metaData = geoObject.properties.get("metaDataProperty")?.GeocoderMetaData;
-              const addressComponents = metaData?.Address?.Components || [];
-              
-              // Ищем город в компонентах адреса
-              addressComponents.forEach((component: any) => {
-                if ((component.kind === "locality" || component.kind === "area" || component.kind === "province") && 
-                    component.name && 
-                    !suggestions.includes(component.name)) {
-                  suggestions.push(component.name);
+              const comps = metaData?.Address?.Components || [];
+              comps.forEach((c: any) => {
+                if (
+                  (c.kind === "locality" || c.kind === "area" || c.kind === "province") &&
+                  c.name &&
+                  !suggestions.includes(c.name)
+                ) {
+                  suggestions.push(c.name);
                 }
               });
             });
-            
-            // Если не нашли через компоненты, пытаемся извлечь из названия
+
             if (suggestions.length === 0) {
               res.geoObjects.each((geoObject: any) => {
-                const name = geoObject.properties.get("name");
                 const text = geoObject.properties.get("text");
-                const firstPart = text?.split(",")[0]?.trim() || name;
-                if (firstPart && !suggestions.includes(firstPart)) {
-                  suggestions.push(firstPart);
-                }
+                const firstPart = text?.split(",")[0]?.trim();
+                if (firstPart && !suggestions.includes(firstPart)) suggestions.push(firstPart);
               });
             }
-            
-            setCitySuggestions(suggestions.slice(0, 7));
-            setShowCitySuggestions(suggestions.length > 0);
-          }
-        })
-        .catch(() => {
-          setCitySuggestions([]);
-          setShowCitySuggestions(false);
-        });
-    }, 300);
-  }, [ymaps]);
 
-  // Функция для получения подсказок улиц
-  const fetchStreetSuggestions = useCallback((query: string, cityName: string) => {
-    if (!ymaps || !query.trim() || query.length < 2 || !cityName) {
-      setStreetSuggestions([]);
-      setShowStreetSuggestions(false);
-      return;
-    }
+            const cut = suggestions.slice(0, 7);
+            setCitySuggestions(cut);
+            setShowCitySuggestions(cut.length > 0);
+          })
+          .catch(() => {
+            setCitySuggestions([]);
+            setShowCitySuggestions(false);
+          });
+      }, 250);
+    },
+    [ymaps]
+  );
 
-    // Очищаем предыдущий таймаут
-    if (suggestTimeoutRef.current) {
-      clearTimeout(suggestTimeoutRef.current);
-    }
+  const handleCityChange = useCallback(
+    (value: string) => {
+      setCity(value);
+      if (value.trim().length >= 2) fetchCitySuggestions(value);
+      else {
+        setCitySuggestions([]);
+        setShowCitySuggestions(false);
+      }
+    },
+    [fetchCitySuggestions]
+  );
 
-    suggestTimeoutRef.current = setTimeout(() => {
-      const fullQuery = `${cityName}, ${query}`;
-      
-      ymaps
-        ?.geocode(fullQuery, { results: 10 })
-        .then((res: any) => {
-          if (res && res.geoObjects) {
+  const handleCitySelect = useCallback(
+    (selectedCity: string) => {
+      setCity(selectedCity);
+      setCitySuggestions([]);
+      setShowCitySuggestions(false);
+
+      if (ymaps) {
+        ymaps
+          .geocode(selectedCity, { results: 1, kind: "locality" })
+          .then((res: any) => {
+            const first = res?.geoObjects?.get(0);
+            if (!first) return;
+            const position = first.geometry.getCoordinates() as [number, number];
+            setCoords(position);
+            if (mapRef.current) mapRef.current.setCenter(position, 11);
+          })
+          .catch(() => {});
+      }
+
+      setTimeout(() => streetInputRef.current?.focus(), 0);
+    },
+    [ymaps]
+  );
+
+  // --------- Suggest (улица) ----------
+  const fetchStreetSuggestions = useCallback(
+    (query: string, cityName: string) => {
+      if (!ymaps || !query.trim() || query.length < 2 || !cityName.trim()) {
+        setStreetSuggestions([]);
+        setShowStreetSuggestions(false);
+        return;
+      }
+
+      if (suggestTimeoutRef.current) clearTimeout(suggestTimeoutRef.current);
+
+      suggestTimeoutRef.current = setTimeout(() => {
+        const fullQuery = `${cityName}, ${query}`;
+        ymaps
+          ?.geocode(fullQuery, { results: 10 })
+          .then((res: any) => {
+            if (!res?.geoObjects) {
+              setStreetSuggestions([]);
+              setShowStreetSuggestions(false);
+              return;
+            }
+
             const suggestions: string[] = [];
             res.geoObjects.each((geoObject: any) => {
               const address = geoObject.properties.get("text");
-              if (address) {
-                // Извлекаем улицу и дом из адреса
-                const parts = address.split(",");
-                if (parts.length > 1) {
-                  const streetPart = parts.slice(1).join(",").trim();
-                  if (streetPart && !suggestions.includes(streetPart)) {
-                    suggestions.push(streetPart);
-                  }
-                }
-              }
+              if (!address) return;
+              const parts = address.split(",");
+              if (parts.length < 2) return;
+              const streetPart = parts.slice(1).join(",").trim();
+              if (streetPart && !suggestions.includes(streetPart)) suggestions.push(streetPart);
             });
-            setStreetSuggestions(suggestions.slice(0, 7));
-            setShowStreetSuggestions(suggestions.length > 0);
-          }
-        })
-        .catch(() => {
-          setStreetSuggestions([]);
-          setShowStreetSuggestions(false);
-        });
-    }, 300);
-  }, [ymaps]);
 
-  // Обработчик изменения города
-  const handleCityChange = useCallback((value: string) => {
-    setCity(value);
-    setStreet(""); // Очищаем улицу при изменении города
-    setShowStreetSuggestions(false);
-    
-    if (value.trim().length >= 2) {
-      fetchCitySuggestions(value);
-    } else {
-      setCitySuggestions([]);
-      setShowCitySuggestions(false);
-    }
-  }, [fetchCitySuggestions]);
+            const cut = suggestions.slice(0, 7);
+            setStreetSuggestions(cut);
+            setShowStreetSuggestions(cut.length > 0);
+          })
+          .catch(() => {
+            setStreetSuggestions([]);
+            setShowStreetSuggestions(false);
+          });
+      }, 250);
+    },
+    [ymaps]
+  );
 
-  // Обработчик выбора города из подсказок
-  const handleCitySelect = useCallback((selectedCity: string) => {
-    setCity(selectedCity);
-    setCitySuggestions([]);
-    setShowCitySuggestions(false);
-    
-    // Геокодируем выбранный город для получения координат
-    if (ymaps) {
-      ymaps
-        .geocode(selectedCity, { results: 1, kind: "locality" })
-        .then((res: any) => {
-          if (res && res.geoObjects) {
-            const firstGeoObject = res.geoObjects.get(0);
-            if (firstGeoObject) {
-              const position = firstGeoObject.geometry.getCoordinates();
-              setSelectedCityCoords(position as [number, number]);
-              setCoords(position as [number, number]);
-              
-              // Обновляем центр карты
-              if (mapRef.current) {
-                mapRef.current.setCenter(position, 11);
-              }
-            }
-          }
-        })
-        .catch(() => {});
-    }
-    
-    // Переходим к вводу улицы
-    setCurrentStep("street");
-    
-    // Фокусируемся на поле улицы
-    setTimeout(() => {
-      streetInputRef.current?.focus();
-    }, 100);
-  }, [ymaps]);
+  const handleStreetChange = useCallback(
+    (value: string) => {
+      setStreet(value);
+      if (value.trim().length >= 2 && city.trim()) fetchStreetSuggestions(value, city);
+      else {
+        setStreetSuggestions([]);
+        setShowStreetSuggestions(false);
+      }
+    },
+    [city, fetchStreetSuggestions]
+  );
 
-  // Обработчик изменения улицы
-  const handleStreetChange = useCallback((value: string) => {
-    setStreet(value);
-    
-    if (value.trim().length >= 2 && city) {
-      fetchStreetSuggestions(value, city);
-    } else {
+  const handleStreetSelect = useCallback(
+    (selectedStreet: string) => {
+      setStreet(selectedStreet);
       setStreetSuggestions([]);
       setShowStreetSuggestions(false);
-    }
-  }, [city, fetchStreetSuggestions]);
 
-  // Обработчик выбора улицы из подсказок
-  const handleStreetSelect = useCallback((selectedStreet: string) => {
-    setStreet(selectedStreet);
-    setStreetSuggestions([]);
-    setShowStreetSuggestions(false);
-    
-    // Геокодируем полный адрес
-    const fullAddress = `${city}, ${selectedStreet}`;
-    if (ymaps) {
+      const fullAddress = `${city}, ${selectedStreet}`;
+      if (!ymaps) return;
+
       isManualGeocodeRef.current = true;
+
       ymaps
         .geocode(fullAddress, { results: 1 })
         .then((res: any) => {
-          if (res && res.geoObjects) {
-            const firstGeoObject = res.geoObjects.get(0);
-            if (firstGeoObject) {
-              const position = firstGeoObject.geometry.getCoordinates();
-              setCoords(position as [number, number]);
-              
-              // Обновляем центр карты
-              if (mapRef.current) {
-                mapRef.current.setCenter(position, 17);
-              }
-            }
-          }
+          const first = res?.geoObjects?.get(0);
+          if (!first) return;
+          const position = first.geometry.getCoordinates() as [number, number];
+          setCoords(position);
+          if (mapRef.current) mapRef.current.setCenter(position, 17);
+        })
+        .catch(() => {})
+        .finally(() => {
           setTimeout(() => {
             isManualGeocodeRef.current = false;
           }, 100);
-        })
-        .catch(() => {
-          isManualGeocodeRef.current = false;
         });
-    }
-  }, [city, ymaps]);
+    },
+    [city, ymaps]
+  );
 
-  const handleSelect = (addr: Address) => {
-    setSelectedId(addr.id);
-    onSelectAddress(addr.address_line);
-    onClose();
-  };
+  // --------- Reverse geocode (coords -> city/street) ----------
+  const handleReverseGeocode = useCallback(
+    (coordinates: [number, number]) => {
+      if (!ymaps) return;
 
-  const handleDelete = async (e: React.MouseEvent<HTMLButtonElement>, addrId: number) => {
-    e.stopPropagation();
-    if (!confirm("Удалить этот адрес?")) return;
+      isManualGeocodeRef.current = true;
 
-    try {
-      console.log("[AddressModal] Deleting address with id:", addrId);
-      const res = await fetch(`/api/addresses/${addrId}`, {
-        method: "DELETE",
-      });
-      
-      if (res.ok) {
-        console.log("[AddressModal] Address deleted successfully");
-        await loadAddresses();
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        console.error("[AddressModal] Failed to delete address:", res.status, errorData);
-        alert(`Не удалось удалить адрес: ${errorData.error || "Неизвестная ошибка"}`);
-      }
-    } catch (err) {
-      console.error("[AddressModal] Failed to delete address:", err);
-      alert("Ошибка при удалении адреса. Проверьте консоль для деталей.");
-    }
-  };
-
-  // Функция геокодирования (из адреса в координаты)
-  const handleGeocode = useCallback((showAlert = false) => {
-    const fullAddress = `${city}, ${street}`.trim();
-
-    if (!ymaps) {
-      if (showAlert) {
-        console.error("Yandex Maps API is not available");
-        alert("Карты Яндекс не загружены. Пожалуйста, подождите немного и попробуйте снова.");
-      }
-      return;
-    }
-
-    if (fullAddress.length === 0) {
-      if (showAlert) {
-        alert("Введите адрес для поиска");
-      }
-      return;
-    }
-
-    try {
-      ymaps
-        .geocode(fullAddress, { results: 1 })
-        .then((res: any) => {
-          if (!res || !res.geoObjects) {
-            if (showAlert) {
-              console.warn("Geocoding response is invalid:", res);
-              alert("Не удалось найти адрес. Попробуйте уточнить адрес.");
-            }
-            return;
-          }
-
-          const firstGeoObject = res.geoObjects.get(0);
-          if (firstGeoObject) {
-            const position = firstGeoObject.geometry.getCoordinates();
-            setCoords(position as [number, number]);
-            
-            // Обновляем центр карты
-            if (mapRef.current) {
-              mapRef.current.setCenter(position, 15);
-            }
-          } else {
-            if (showAlert) {
-              console.warn("No geo objects found for address:", fullAddress);
-              alert("Адрес не найден. Попробуйте уточнить адрес.");
-            }
-          }
-        })
-        .catch((error: any) => {
-          if (showAlert) {
-            console.error("Geocoding error:", error);
-            alert("Не удалось найти адрес. Проверьте правильность ввода или попробуйте позже.");
-          }
-        });
-    } catch (error: any) {
-      if (showAlert) {
-        console.error("Unexpected error in handleGeocode:", error);
-        alert("Произошла неожиданная ошибка при поиске адреса.");
-      }
-    }
-  }, [city, street, ymaps]);
-
-  // Функция обратного геокодирования (из координат в адрес)
-  const handleReverseGeocode = useCallback((coordinates: [number, number]) => {
-    if (!ymaps) {
-      console.error("Yandex Maps API is not available");
-      return;
-    }
-
-    try {
-      isManualGeocodeRef.current = true; // Устанавливаем флаг, чтобы не вызвать автоматическое геокодирование
-      
       ymaps
         .geocode(coordinates, { results: 1 })
         .then((res: any) => {
-          if (!res || !res.geoObjects) {
-            console.warn("Reverse geocoding response is invalid:", res);
-            return;
+          const first = res?.geoObjects?.get(0);
+          if (!first) return;
+
+          const comps =
+            first.properties.get("metaDataProperty")?.GeocoderMetaData?.Address?.Components || [];
+
+          let foundCity = "";
+          let foundStreet = "";
+
+          comps.forEach((c: any) => {
+            if (c.kind === "locality" || c.kind === "area") foundCity = c.name;
+            if (c.kind === "street" || c.kind === "route") foundStreet = c.name;
+            if (c.kind === "house") foundStreet = `${foundStreet} ${c.name}`.trim();
+          });
+
+          if (!foundCity) {
+            const text = first.properties.get("text") || "";
+            const p = text.split(",");
+            if (p.length > 0) foundCity = p[0].trim();
           }
 
-          const firstGeoObject = res.geoObjects.get(0);
-          if (firstGeoObject) {
-            const addressComponents = firstGeoObject.properties.get("metaDataProperty")?.GeocoderMetaData?.Address?.Components || [];
-            
-            // Парсим компоненты адреса
-            let foundCity = "";
-            let foundStreet = "";
-            
-            addressComponents.forEach((component: any) => {
-              if (component.kind === "locality" || component.kind === "area") {
-                foundCity = component.name;
-              } else if (component.kind === "street" || component.kind === "route") {
-                foundStreet = component.name;
-              } else if (component.kind === "house") {
-                foundStreet = `${foundStreet} ${component.name}`.trim();
-              }
-            });
-
-            // Если не нашли город, используем из полного адреса
-            if (!foundCity) {
-              const fullAddress = firstGeoObject.properties.get("text") || "";
-              const parts = fullAddress.split(",");
-              if (parts.length > 0) {
-                foundCity = parts[0].trim();
-              }
-            }
-
-            // Если не нашли улицу, пытаемся извлечь из полного адреса
-            if (!foundStreet) {
-              const fullAddress = firstGeoObject.properties.get("text") || "";
-              const parts = fullAddress.split(",");
-              if (parts.length > 1) {
-                foundStreet = parts.slice(1).join(",").trim();
-              }
-            }
-
-            // Обновляем поля формы
-            if (foundCity) setCity(foundCity);
-            if (foundStreet) setStreet(foundStreet);
-
-            setTimeout(() => {
-              isManualGeocodeRef.current = false; // Сбрасываем флаг через небольшую задержку
-            }, 100);
+          if (!foundStreet) {
+            const text = first.properties.get("text") || "";
+            const p = text.split(",");
+            if (p.length > 1) foundStreet = p.slice(1).join(",").trim();
           }
+
+          if (foundCity) setCity(foundCity);
+          if (foundStreet) setStreet(foundStreet);
         })
-        .catch((error: any) => {
-          console.error("Reverse geocoding error:", error);
-          isManualGeocodeRef.current = false;
+        .catch(() => {})
+        .finally(() => {
+          setTimeout(() => {
+            isManualGeocodeRef.current = false;
+          }, 100);
         });
-    } catch (error: any) {
-      console.error("Unexpected error in handleReverseGeocode:", error);
-      isManualGeocodeRef.current = false;
-    }
-  }, [ymaps]);
+    },
+    [ymaps]
+  );
 
-  // Запрос геопозиции у пользователя и подстановка в карту/поля
+  // --------- Geolocation ----------
   const requestAndApplyGeolocation = useCallback(() => {
     if (geoStatus === "requesting") return;
     if (geoRequestedRef.current) return;
 
     if (typeof window !== "undefined" && !window.isSecureContext) {
-      // Geolocation generally requires HTTPS (localhost is treated as secure).
       setGeoStatus("insecure");
       return;
     }
@@ -504,8 +342,6 @@ const AddressModalContent = ({
     geoRequestedRef.current = true;
     setGeoStatus("requesting");
 
-    // If permission is already granted, prefer watchPosition (more reliable on some devices)
-    // and stop after the first successful fix.
     const perms = (navigator as any).permissions;
     if (perms?.query) {
       perms
@@ -530,9 +366,7 @@ const AddressModalContent = ({
                     geoWatchIdRef.current = null;
                   }
                 },
-                (err) => {
-                  console.warn("[AddressModal] watchPosition error:", err);
-                  // If watch fails, we'll rely on getCurrentPosition below.
+                () => {
                   if (geoWatchIdRef.current != null) {
                     navigator.geolocation.clearWatch(geoWatchIdRef.current);
                     geoWatchIdRef.current = null;
@@ -552,115 +386,75 @@ const AddressModalContent = ({
         const next: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         setGeoStatus("granted");
         setCoords(next);
-
-        // Обновляем центр карты и приближаем
-        if (mapRef.current) {
-          mapRef.current.setCenter(next, 16);
-        }
-
-        // Подставляем адрес в поля (если API карт уже готово)
+        if (mapRef.current) mapRef.current.setCenter(next, 16);
         handleReverseGeocode(next);
       },
       (err) => {
-        // Не блокируем пользователя — просто продолжаем без геопозиции
-        console.warn("[AddressModal] Geolocation error:", err);
         if (err.code === err.PERMISSION_DENIED) {
           setGeoStatus("denied");
-          // keep geoRequestedRef=true to avoid repeated browser prompts
           return;
         }
-
-        // Allow retry on transient errors (timeout / unavailable)
-        // But user wants auto-detect: if permission is already granted, we keep watching;
-        // otherwise we'll just show the message and user can pick on the map.
-        geoRequestedRef.current = true;
         setGeoStatus(err.code === err.TIMEOUT ? "timeout" : "unavailable");
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 60_000,
-      }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
     );
   }, [geoStatus, handleReverseGeocode]);
 
-  // Когда пользователь начинает добавлять адрес — запрашиваем геопозицию один раз
   useEffect(() => {
     if (!isOpen) return;
-    if (step !== "add") return;
     requestAndApplyGeolocation();
-  }, [isOpen, step, requestAndApplyGeolocation]);
+  }, [isOpen, requestAndApplyGeolocation]);
 
-  // Обработчик клика на карту
-  const handleMapClick = useCallback((event: any) => {
-    if (!ymaps || !event) return;
-    
-    const coordinates = event.get("coords") as [number, number];
-    if (coordinates && coordinates.length === 2) {
+  // --------- Click on map ----------
+  const handleMapClick = useCallback(
+    (event: any) => {
+      if (!event) return;
+      const coordinates = event.get("coords") as [number, number];
+      if (!coordinates || coordinates.length !== 2) return;
+
       setCoords(coordinates);
       handleReverseGeocode(coordinates);
-      
-      // Обновляем центр карты и приближаем
-      if (mapRef.current) {
-        mapRef.current.setCenter(coordinates, 17);
-      }
-    }
-  }, [ymaps, handleReverseGeocode]);
+      if (mapRef.current) mapRef.current.setCenter(coordinates, 17);
+    },
+    [handleReverseGeocode]
+  );
 
-  // Обновление центра карты при изменении координат и настройка обработчика клика
-  useEffect(() => {
-    if (mapRef.current && step === "add") {
-      // Обновляем центр карты
-      mapRef.current.setCenter(coords, 15);
-      
-      // Добавляем обработчик клика, если его еще нет
-      if (mapRef.current.events && !mapRef.current._clickHandlerAdded) {
-        mapRef.current.events.add("click", handleMapClick);
-        mapRef.current._clickHandlerAdded = true;
-      }
-    }
-    
-    return () => {
-      // Очищаем обработчик при размонтировании
-      if (mapRef.current?.events && mapRef.current._clickHandlerAdded) {
-        mapRef.current.events.remove("click", handleMapClick);
-        mapRef.current._clickHandlerAdded = false;
-      }
-    };
-  }, [coords, step, handleMapClick]);
+  // --------- Auto geocode when typing street (debounced) ----------
+  const handleGeocode = useCallback(() => {
+    const fullAddress = `${city}, ${street}`.trim();
+    if (!ymaps || fullAddress.length < 5) return;
 
-  // Автоматическое геокодирование при изменении улицы (только если город выбран)
+    ymaps
+      .geocode(fullAddress, { results: 1 })
+      .then((res: any) => {
+        const first = res?.geoObjects?.get(0);
+        if (!first) return;
+        const position = first.geometry.getCoordinates() as [number, number];
+        setCoords(position);
+        if (mapRef.current) mapRef.current.setCenter(position, 15);
+      })
+      .catch(() => {});
+  }, [city, street, ymaps]);
+
   useEffect(() => {
-    if (step !== "add" || !ymaps || !city || !street) return;
-    
-    // Пропускаем, если это программное обновление полей
+    if (!isOpen) return;
+    if (!ymaps) return;
+    if (!city.trim() || !street.trim()) return;
     if (isManualGeocodeRef.current) return;
 
-    // Очищаем предыдущий таймаут
-    if (geocodeTimeoutRef.current) {
-      clearTimeout(geocodeTimeoutRef.current);
-    }
+    if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
 
-    // Устанавливаем новый таймаут для debounce (800мс) - больше, чем для подсказок
     geocodeTimeoutRef.current = setTimeout(() => {
-      const fullAddress = `${city}, ${street}`.trim();
-      if (fullAddress.length > 5) { // Минимум 5 символов для поиска
-        handleGeocode(false); // Не показываем alert при автоматическом поиске
-      }
-    }, 800);
+      handleGeocode();
+    }, 700);
 
     return () => {
-      if (geocodeTimeoutRef.current) {
-        clearTimeout(geocodeTimeoutRef.current);
-      }
+      if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
     };
-  }, [street, city, step, ymaps, handleGeocode]);
+  }, [city, street, ymaps, isOpen, handleGeocode]);
 
   const handleSaveNewAddress = async () => {
-    // Формируем полный адрес: улица и дом, город
-    const addressLine = street.trim().length > 0 
-      ? `${street.trim()}, ${city.trim()}`
-      : `${city.trim()}`;
+    const addressLine = street.trim().length > 0 ? `${street.trim()}, ${city.trim()}` : `${city.trim()}`;
 
     try {
       const res = await fetch("/api/addresses", {
@@ -671,297 +465,342 @@ const AddressModalContent = ({
           city: city.trim(),
           latitude: coords[0],
           longitude: coords[1],
+          set_default: true,
         }),
       });
 
       if (res.ok) {
-        await loadAddresses();
-        onSelectAddress(addressLine);
-        onClose();
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        console.error("Failed to save address:", res.status, errorData);
-        
-        if (res.status === 401) {
-          alert("Необходимо авторизоваться для сохранения адреса");
-        } else {
-          alert(`Не удалось сохранить адрес: ${errorData.error || "Неизвестная ошибка"}`);
+        const data = (await res.json().catch(() => ({}))) as { id?: number };
+        const id = Number(data?.id);
+        if (!Number.isFinite(id)) {
+          alert("Адрес сохранён, но сервер не вернул id. Обновите страницу и попробуйте снова.");
+          return;
         }
+
+        onSelectAddress({
+          id,
+          label: addressLine,
+          city: city.trim(),
+          latitude: coords[0],
+          longitude: coords[1],
+        });
+        onClose();
+        return;
       }
-    } catch (e: any) {
-      console.error("Failed to save address:", e);
+
+      const errorData = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        alert("Необходимо авторизоваться для сохранения адреса");
+      } else {
+        alert(`Не удалось сохранить адрес: ${errorData.error || "Неизвестная ошибка"}`);
+      }
+    } catch (e) {
       alert("Ошибка при сохранении адреса. Проверьте консоль для деталей.");
+      console.error(e);
     }
   };
 
+  const canSave = !!city.trim() && !!street.trim() && hasHouseNumber(street);
+
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
-      <div className="relative w-full max-w-3xl rounded-[32px] bg-white p-6 sm:p-8 shadow-vilka-soft">
-        {/* Верхняя панель */}
-        <div className="mb-6 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => (step === "list" ? onClose() : setStep("list"))}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-          <span className="text-sm font-semibold text-slate-900">
-            {step === "list" ? "Выбрать адрес" : "Добавить адрес"}
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-soft text-slate-700"
-          >
-            <X className="h-4 w-4" />
-          </button>
+    <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-6">
+      {/* MAP */}
+      <div className="relative min-h-[360px] overflow-hidden rounded-[28px] bg-slate-100 ring-1 ring-slate-200 lg:min-h-0">
+        {(geoStatus === "requesting" ||
+          geoStatus === "denied" ||
+          geoStatus === "unavailable" ||
+          geoStatus === "timeout" ||
+          geoStatus === "insecure") && (
+          <div className="absolute left-4 top-4 z-10 max-w-[calc(100%-32px)] rounded-2xl bg-white/95 px-3 py-2 text-[12px] font-semibold text-slate-700 shadow-sm">
+            {geoStatus === "requesting"
+              ? "Определяем ваше местоположение…"
+              : geoStatus === "denied"
+              ? "Геопозиция запрещена — можно выбрать точку на карте вручную."
+              : geoStatus === "timeout"
+              ? "Не удалось получить геопозицию (таймаут). Можно выбрать точку на карте вручную."
+              : geoStatus === "insecure"
+              ? "Геопозиция требует HTTPS (или localhost). Можно выбрать точку на карте вручную."
+              : "Геопозиция недоступна — можно выбрать точку на карте вручную."}
+          </div>
+        )}
+
+        <Map
+          instanceRef={(ref: any) => {
+            mapRef.current = ref;
+          }}
+          defaultState={{ center: coords, zoom: 12 }}
+          state={{ center: coords }}
+          width="100%"
+          height="100%"
+          onClick={handleMapClick}
+        >
+          <Placemark geometry={coords} />
+        </Map>
+      </div>
+
+      {/* RIGHT */}
+      <div className="flex h-full min-h-0 flex-col px-1 sm:px-2">
+        <div className="mb-6 mt-1 text-center text-[28px] font-semibold tracking-tight text-slate-900">
+          Добавить адрес
         </div>
 
-        {step === "list" ? (
-          <>
-            {loading ? (
-              <div className="py-8 text-center text-sm text-slate-500">
-                Загрузка адресов...
-              </div>
-            ) : addresses.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-500">
-                У вас пока нет сохраненных адресов
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {addresses.map((addr) => {
-                  const selected = addr.id === selectedId;
-                  return (
-                    <div
-                      key={addr.id}
-                      className={`flex w-full items-center justify-between rounded-2xl px-3 py-3 transition ${
-                        selected ? "bg-surface-soft" : ""
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSelect(addr)}
-                        className="flex-1 text-left"
-                      >
-                        <div className="text-sm font-semibold text-slate-900">
-                          {addr.address_line}
-                        </div>
-                        {(addr.city || addr.comment) && (
-                          <div className="text-xs text-slate-500">
-                            {[addr.city, addr.comment].filter(Boolean).join(" · ")}
-                          </div>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => handleDelete(e, addr.id)}
-                        className="ml-2 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500"
-                        title="Удалить адрес"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+        <div className="min-h-0 flex-1 overflow-y-auto pb-6">
+          {/* CITY */}
+          <div className="relative">
+            <div className="relative">
+              <input
+                ref={cityInputRef}
+                id="city-input"
+                value={city}
+                onChange={(e) => handleCityChange(e.target.value)}
+                onFocus={() => {
+                  requestAndApplyGeolocation();
+                  if (city.trim().length >= 2) setShowCitySuggestions(true);
+                }}
+                onBlur={() => setTimeout(() => setShowCitySuggestions(false), 200)}
+                placeholder=" "
+                className={[
+                  "peer h-14 w-full rounded-full bg-slate-100 px-5 pr-12",
+                  "pt-6 pb-2 text-[15px] font-semibold text-slate-900",
+                  "border border-transparent outline-none transition",
+                  "focus:bg-white focus:border-emerald-300",
+                ].join(" ")}
+              />
 
-            <button
-              type="button"
-              onClick={() => setStep("add")}
-              className="vilka-btn-primary mt-6 w-full py-3 text-sm font-semibold"
-            >
-              Новый адрес
-            </button>
-          </>
-        ) : (
-          <>
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-              {/* Карта */}
-              <div className="relative h-72 rounded-3xl">
-                  {(geoStatus === "requesting" ||
-                    geoStatus === "denied" ||
-                    geoStatus === "unavailable" ||
-                    geoStatus === "timeout" ||
-                    geoStatus === "insecure") && (
-                    <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-24px)] rounded-2xl bg-white/90 px-3 py-2 text-[11px] text-slate-700 shadow-vilka-soft">
-                      <div>
-                        {geoStatus === "requesting"
-                          ? "Определяем ваше местоположение…"
-                          : geoStatus === "denied"
-                          ? "Доступ к геопозиции запрещён — можно выбрать точку на карте вручную."
-                          : geoStatus === "timeout"
-                          ? "Не удалось получить геопозицию (таймаут). Можно выбрать точку на карте вручную."
-                          : geoStatus === "insecure"
-                          ? "Геопозиция требует HTTPS (или localhost). Можно выбрать точку на карте вручную."
-                          : "Геопозиция недоступна — можно выбрать точку на карте вручную."}
-                      </div>
-                    </div>
-                  )}
-                  <Map
-                    instanceRef={(ref: any) => {
-                      mapRef.current = ref;
-                    }}
-                    defaultState={{
-                      center: coords,
-                      zoom: 12,
-                    }}
-                    width="100%"
-                    height="100%"
-                  >
-                    <Placemark geometry={coords} />
-                  </Map>
-              </div>
+              <label
+                htmlFor="city-input"
+                className={[
+                  "pointer-events-none absolute left-5",
+                  "top-3 translate-y-0",
+                  "text-[12px] font-semibold text-slate-400 transition-all",
+                  "peer-placeholder-shown:top-1/2 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-[15px]",
+                  "peer-focus:top-3 peer-focus:translate-y-0 peer-focus:text-[12px]",
+                ].join(" ")}
+              >
+                Город
+              </label>
 
-              {/* Форма */}
-              <div className="flex flex-col gap-3">
-                {/* Шаг 1: Ввод города */}
-                {currentStep === "city" && (
-                  <div className="relative">
-                    <label className="text-xs font-semibold text-slate-500">
-                      Город
-                    </label>
-                    <div className="relative">
-                      <input
-                        ref={cityInputRef}
-                        type="text"
-                        value={city}
-                        onChange={(e: { target: { value: string } }) => handleCityChange(e.target.value)}
-                        onFocus={() => {
-                          requestAndApplyGeolocation();
-                          if (city.length >= 2) {
-                            setShowCitySuggestions(true);
-                          }
-                        }}
-                        onBlur={() => {
-                          // Задержка, чтобы клик по подсказке успел сработать
-                          setTimeout(() => setShowCitySuggestions(false), 200);
-                        }}
-                        placeholder="Введите город"
-                        className="mt-1 w-full rounded-2xl bg-surface-soft px-3 py-2 text-sm text-slate-900"
-                        autoFocus
-                      />
-                    </div>
-                    {showCitySuggestions && citySuggestions.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-2xl bg-white shadow-lg border border-slate-200 max-h-48 overflow-y-auto">
-                        {citySuggestions.map((suggestion, index) => (
-                          <button
-                            key={index}
-                            type="button"
-                            onClick={() => handleCitySelect(suggestion)}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-surface-soft transition-colors first:rounded-t-2xl last:rounded-b-2xl"
-                          >
-                            <div className="font-semibold text-slate-900">{suggestion}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Шаг 2: Ввод улицы */}
-                {currentStep === "street" && (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCurrentStep("city");
-                        setStreet("");
-                        setStreetSuggestions([]);
-                        setShowStreetSuggestions(false);
-                      }}
-                      className="mb-2 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
-                    >
-                      <ArrowLeft className="h-3 w-3" />
-                      <span>Изменить город: {city}</span>
-                    </button>
-                    <label className="text-xs font-semibold text-slate-500">
-                      Улица и дом
-                    </label>
-                    <div className="relative">
-                      <input
-                        ref={streetInputRef}
-                        type="text"
-                        value={street}
-                        onChange={(e: { target: { value: string } }) => handleStreetChange(e.target.value)}
-                        onFocus={() => {
-                          requestAndApplyGeolocation();
-                          if (street.length >= 2 && city) {
-                            setShowStreetSuggestions(true);
-                          }
-                        }}
-                        onBlur={() => {
-                          setTimeout(() => setShowStreetSuggestions(false), 200);
-                        }}
-                        placeholder="Введите улицу и дом"
-                        className="mt-1 w-full rounded-2xl bg-surface-soft px-3 py-2 text-sm text-slate-900"
-                        autoFocus
-                      />
-                    </div>
-                    {showStreetSuggestions && streetSuggestions.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-2xl bg-white shadow-lg border border-slate-200 max-h-48 overflow-y-auto">
-                        {streetSuggestions.map((suggestion, index) => (
-                          <button
-                            key={index}
-                            type="button"
-                            onClick={() => handleStreetSelect(suggestion)}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-surface-soft transition-colors first:rounded-t-2xl last:rounded-b-2xl"
-                          >
-                            <div className="font-semibold text-slate-900">{suggestion}</div>
-                            <div className="text-xs text-slate-500">{city}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-              </div>
+              {city.trim().length > 0 && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={clearCity}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-full bg-slate-200/60 text-slate-700 hover:bg-slate-200"
+                  aria-label="Очистить город"
+                  title="Очистить"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
-            <button
-              type="button"
-              onClick={handleSaveNewAddress}
-              disabled={!city || !street || !hasHouseNumber(street)}
-              className={`mt-6 w-full py-3 text-sm font-semibold rounded-full transition-colors ${
-                city && street && hasHouseNumber(street)
-                  ? "vilka-btn-primary"
-                  : "bg-slate-200 text-slate-400 cursor-not-allowed"
-              }`}
-            >
-              Сохранить адрес
-            </button>
-          </>
-        )}
+            {showCitySuggestions && citySuggestions.length > 0 && (
+              <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-lg">
+                {citySuggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleCitySelect(s)}
+                    className="w-full px-5 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* STREET */}
+          <div className="relative mt-4">
+            <div className="relative">
+              <input
+                ref={streetInputRef}
+                id="street-input"
+                value={street}
+                onChange={(e) => handleStreetChange(e.target.value)}
+                onFocus={() => {
+                  requestAndApplyGeolocation();
+                  if (street.trim().length >= 2 && city.trim()) setShowStreetSuggestions(true);
+                }}
+                onBlur={() => setTimeout(() => setShowStreetSuggestions(false), 200)}
+                placeholder=" "
+                className={[
+                  "peer h-14 w-full rounded-full bg-slate-100 px-5 pr-12",
+                  "pt-6 pb-2 text-[15px] font-semibold text-slate-900",
+                  "border border-transparent outline-none transition",
+                  "focus:bg-white focus:border-emerald-300",
+                ].join(" ")}
+              />
+
+              <label
+                htmlFor="street-input"
+                className={[
+                  "pointer-events-none absolute left-5",
+                  "top-3 translate-y-0",
+                  "text-[12px] font-semibold text-slate-400 transition-all",
+                  "peer-placeholder-shown:top-1/2 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-[15px]",
+                  "peer-focus:top-3 peer-focus:translate-y-0 peer-focus:text-[12px]",
+                ].join(" ")}
+              >
+                Улица и дом
+              </label>
+
+              {street.trim().length > 0 && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={clearStreet}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-full bg-slate-200/60 text-slate-700 hover:bg-slate-200"
+                  aria-label="Очистить адрес"
+                  title="Очистить"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {showStreetSuggestions && streetSuggestions.length > 0 && (
+              <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-lg">
+                {streetSuggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleStreetSelect(s)}
+                    className="w-full px-5 py-3 text-left hover:bg-slate-50"
+                  >
+                    <div className="text-sm font-semibold text-slate-900">{s}</div>
+                    {city ? <div className="text-xs font-semibold text-slate-400">{city}</div> : null}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSaveNewAddress}
+          disabled={!canSave}
+          className={[
+            "h-14 w-full rounded-full px-6 text-base font-semibold transition",
+            canSave
+              ? "bg-[#ff2d55] text-white hover:bg-[#ff1846] active:scale-[0.99]"
+              : "cursor-not-allowed bg-slate-200 text-slate-400",
+          ].join(" ")}
+        >
+          Да, всё верно
+        </button>
       </div>
     </div>
   );
-};
+}
 
-const AddressModal: React.FC<AddressModalProps> = (props) => {
-  if (!props.isOpen) return null;
+export default function AddressModal(props: AddressModalProps) {
+  const { isOpen, onClose } = props;
 
-  // Получаем API ключ из переменной окружения или используем пустую строку
+  const [mounted, setMounted] = useState(false);
+
+  // держим компонент в DOM, пока проигрывается анимация закрытия
+  const [shouldRender, setShouldRender] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => setMounted(true), []);
+
+  // реагируем на isOpen
+  useEffect(() => {
+    if (!mounted) return;
+
+    if (isOpen) {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      setShouldRender(true);
+      setClosing(false);
+      return;
+    }
+
+    if (!isOpen && shouldRender) {
+      setClosing(true);
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => {
+        setShouldRender(false);
+        setClosing(false);
+      }, ANIM_MS);
+    }
+  }, [isOpen, mounted, shouldRender]);
+
+  // Esc
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onClose]);
+
+  // lock body scroll while modal is rendered (open or closing)
+  useEffect(() => {
+    if (!shouldRender) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [shouldRender]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  if (!mounted || !shouldRender) return null;
+
   const yandexApiKey = process.env.NEXT_PUBLIC_YANDEX_MAPS_API_KEY || "";
 
-  return (
-    <YMaps 
-      query={yandexApiKey ? { apikey: yandexApiKey } : undefined}
-      onError={(error: any) => {
-        // Детальное логирование ошибки
-        console.error("Yandex Maps initialization error:", {
-          error,
-          errorType: typeof error,
-          errorString: String(error),
-          errorJSON: JSON.stringify(error, Object.getOwnPropertyNames(error)),
-          hasApiKey: !!yandexApiKey,
-        });
-      }}
-    >
-      <AddressModalContent {...props} />
-    </YMaps>
-  );
-};
+  return createPortal(
+    <div className="fixed inset-0 z-[100]">
+      {/* overlay */}
+      <div
+        className={["profile-drawer-overlay absolute inset-0 bg-black/45", closing ? "closing" : ""].join(" ")}
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
-export default AddressModal;
+      {/* panel справа */}
+      <div
+        className={[
+          "profile-drawer-panel absolute inset-y-0 right-0 w-full max-w-[980px] p-4 sm:p-5",
+          closing ? "closing" : "",
+        ].join(" ")}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Добавить адрес"
+      >
+        <div className="relative h-full overflow-hidden rounded-[40px] bg-white shadow-2xl">
+          {/* внутренние отступы */}
+          <div className="relative h-full p-5 sm:p-6">
+            {/* X */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute right-5 top-5 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+              aria-label="Закрыть"
+              title="Закрыть"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <YMaps query={yandexApiKey ? { apikey: yandexApiKey } : undefined}>
+              <AddressModalContent {...props} />
+            </YMaps>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}

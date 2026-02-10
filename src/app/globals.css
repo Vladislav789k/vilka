@@ -123,24 +123,25 @@ body {
   }
 }
 
-/* Класс для модального окна */
+/* Auth drawer — как ProfileDrawer */
 .auth-modal {
   animation: slideInFromRight 0.5s ease-out forwards;
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 350px; /* Размер модального окна */
-  height: 100%;
-  background-color: white;
-  box-shadow: -4px 0px 15px rgba(0, 0, 0, 0.2);
-  padding: 20px;
-  z-index: 9999;
+  will-change: transform;
 }
 
-/* При закрытии окна */
 .auth-modal.closing {
   animation: slideOutToRight 0.5s ease-out forwards;
 }
+
+.auth-overlay {
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+}
+
+.auth-overlay.closing {
+  opacity: 0;
+}
+
 
 /* Чат — центрированный модал как в макете */
 .chat-modal {
@@ -149,4 +150,22 @@ body {
 
 .chat-modal.closing {
   animation: chatModalOut 0.18s ease-in forwards;
+}
+
+/* Profile drawer — как AuthModal (slide in/out справа) */
+.profile-drawer-panel {
+  animation: slideInFromRight 0.5s ease-out forwards;
+}
+
+.profile-drawer-panel.closing {
+  animation: slideOutToRight 0.5s ease-out forwards;
+}
+
+.profile-drawer-overlay {
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+}
+
+.profile-drawer-overlay.closing {
+  opacity: 0;
 }

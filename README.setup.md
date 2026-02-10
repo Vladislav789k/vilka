@@ -113,6 +113,26 @@ docker compose up postgres -d
 - `DATABASE_URL`: Use `localhost` as hostname
 - `REDIS_URL`: Use `localhost` as hostname
 
+#### Yandex Delivery (express API)
+Для расчёта и создания заявки через Яндекс Доставку используются серверные эндпоинты:
+- `POST /api/delivery/yandex/quote` — расчёт стоимости (только `courier` + `thermobag`)
+- `POST /api/delivery/yandex/claim` — создание заявки (только `courier` + `thermobag`)
+- `POST /api/delivery/yandex/info` — информация по заявке (polling статуса)
+- `POST /api/delivery/yandex/accept` — подтверждение заявки (после оценки)
+
+Нужно добавить в `.env.local`:
+```
+YANDEX_DELIVERY_TOKEN="Bearer token without 'Bearer' prefix"
+```
+
+Важно:
+- В БД у ресторана должны быть заданы `latitude/longitude` (таблица `restaurants`), иначе расчёт/создание заявки вернёт ошибку.
+- Адрес доставки берётся из `user_addresses` по `addressId` и должен принадлежать авторизованному пользователю.
+- Контакт отправителя (точка `source`) берётся из БД:
+  - имя: `restaurants.settings.contact_name` → `user_profiles.full_name` → `restaurants.name`
+  - телефон: `restaurants.settings.contact_phone` → `users.phone` (владелец ресторана)
+  - email: `restaurants.settings.contact_email` → `users.email`
+
 ### Docker (in `docker-compose.yml`)
 - `DATABASE_URL`: Use `postgres` as hostname (Docker service name)
 - `REDIS_URL`: Use `redis` as hostname (Docker service name)
