@@ -10,6 +10,7 @@ type AddressPaymentStepProps = {
   onUpdateDraft: (updates: Partial<CheckoutDraft>) => void;
   onOpenAddressModal: () => void;
   totals: CartTotals;
+  deliveryFee?: number | null;
 };
 
 export default function AddressPaymentStep({
@@ -17,16 +18,17 @@ export default function AddressPaymentStep({
   onUpdateDraft,
   onOpenAddressModal,
   totals,
+  deliveryFee = 0,
 }: AddressPaymentStepProps) {
   const formatMoney = new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
 
-  const deliveryFee = 0;
   const discount = 0;
   const subtotal = totals.totalPrice;
-  const total = subtotal + deliveryFee - discount;
+  const effectiveDelivery = deliveryFee ?? 0;
+  const total = subtotal + effectiveDelivery - discount;
 
   return (
     <div className="flex flex-col gap-6">
@@ -144,7 +146,7 @@ export default function AddressPaymentStep({
           <div className="flex items-center justify-between text-slate-600">
             <span>Доставка</span>
             <span className="tabular-nums">
-              {deliveryFee === 0 ? "Бесплатно" : `${formatMoney.format(deliveryFee)} ₽`}
+              {deliveryFee == null ? "—" : deliveryFee === 0 ? "Бесплатно" : `${formatMoney.format(deliveryFee)} ₽`}
             </span>
           </div>
           <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900">

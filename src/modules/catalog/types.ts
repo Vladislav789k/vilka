@@ -23,6 +23,7 @@ export type BaseItem = {
 export type Offer = {
   id: OfferId;
   baseItemId: BaseItemId;
+  restaurantId: number;
   isAnonymous: boolean;
   brand?: string;
   price: Money;
@@ -34,10 +35,18 @@ export type Offer = {
   stock: number;
 };
 
+export type Restaurant = {
+  id: number;
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
 export type CatalogData = {
   categories: Category[];
   subcategories: Subcategory[];
   baseItems: BaseItem[];
   offers: Offer[];
+  restaurants: Restaurant[];
 };
 

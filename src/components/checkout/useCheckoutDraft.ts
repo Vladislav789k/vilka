@@ -10,6 +10,9 @@ export function useCheckoutDraft() {
     if (typeof window === "undefined") {
       return {
         addressLabel: null,
+        addressId: null,
+        addressLatitude: null,
+        addressLongitude: null,
         apartment: "",
         entrance: "",
         floor: "",
@@ -30,6 +33,9 @@ export function useCheckoutDraft() {
 
     return {
       addressLabel: null,
+      addressId: null,
+      addressLatitude: null,
+      addressLongitude: null,
       apartment: "",
       entrance: "",
       floor: "",
@@ -54,6 +60,9 @@ export function useCheckoutDraft() {
   const clearDraft = () => {
     setDraft({
       addressLabel: null,
+      addressId: null,
+      addressLatitude: null,
+      addressLongitude: null,
       apartment: "",
       entrance: "",
       floor: "",

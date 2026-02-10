@@ -8,7 +8,13 @@ import { YMaps, Map, Placemark, useYMaps } from "@iminside/react-yandex-maps";
 type AddressModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onSelectAddress: (label: string) => void;
+  onSelectAddress: (address: {
+    id: number;
+    label: string;
+    city: string;
+    latitude: number;
+    longitude: number;
+  }) => void;
 };
 
 const ANIM_MS = 500;
@@ -459,11 +465,25 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
           city: city.trim(),
           latitude: coords[0],
           longitude: coords[1],
+          set_default: true,
         }),
       });
 
       if (res.ok) {
-        onSelectAddress(addressLine);
+        const data = (await res.json().catch(() => ({}))) as { id?: number };
+        const id = Number(data?.id);
+        if (!Number.isFinite(id)) {
+          alert("Адрес сохранён, но сервер не вернул id. Обновите страницу и попробуйте снова.");
+          return;
+        }
+
+        onSelectAddress({
+          id,
+          label: addressLine,
+          city: city.trim(),
+          latitude: coords[0],
+          longitude: coords[1],
+        });
         onClose();
         return;
       }
@@ -655,6 +675,7 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
               </div>
             )}
           </div>
+
         </div>
 
         <button

@@ -1,10 +1,12 @@
 import { query } from "@/lib/db";
-import type { CatalogData, Category, Subcategory, BaseItem, Offer } from "./types";
+import type { CatalogData, Category, Subcategory, BaseItem, Offer, Restaurant } from "./types";
 
 type CatalogRow = {
   menu_item_id: number;
   restaurant_id: number;
   restaurant_name: string;
+  restaurant_latitude: number | null;
+  restaurant_longitude: number | null;
   menu_item_name: string;
   composition: string | null;
   price: number;
@@ -29,6 +31,8 @@ export async function getCatalogData(): Promise<CatalogData> {
       mi.id                 AS menu_item_id,
       mi.restaurant_id      AS restaurant_id,
       r.name                AS restaurant_name,
+      r.latitude            AS restaurant_latitude,
+      r.longitude           AS restaurant_longitude,
       mi.name               AS menu_item_name,
       mi.composition        AS composition,
       mi.price              AS price,
@@ -109,9 +113,19 @@ export async function getCatalogData(): Promise<CatalogData> {
   const categoryMap = new Map<string, Category>();
   const subcategoryMap = new Map<string, Subcategory>();
   const baseItemMap = new Map<string, BaseItem>();
+  const restaurantMap = new Map<number, Restaurant>();
   const offers: Offer[] = [];
 
   for (const row of rows) {
+    if (!restaurantMap.has(row.restaurant_id)) {
+      restaurantMap.set(row.restaurant_id, {
+        id: row.restaurant_id,
+        name: row.restaurant_name,
+        latitude: row.restaurant_latitude ?? null,
+        longitude: row.restaurant_longitude ?? null,
+      });
+    }
+
     const level1Code =
       row.level1_code ?? row.level2_code ?? row.level3_code ?? "other-l1";
     const level1Name =
@@ -178,6 +192,7 @@ export async function getCatalogData(): Promise<CatalogData> {
     offers.push({
       id: String(row.menu_item_id),
       baseItemId,
+      restaurantId: row.restaurant_id,
       isAnonymous: row.is_brand_anonymous,
       brand: row.is_brand_anonymous ? undefined : row.restaurant_name,
       price: finalPrice,
@@ -195,6 +210,7 @@ export async function getCatalogData(): Promise<CatalogData> {
     subcategories: Array.from(subcategoryMap.values()),
     baseItems: Array.from(baseItemMap.values()),
     offers,
+    restaurants: Array.from(restaurantMap.values()),
   };
 }
 

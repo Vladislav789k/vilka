@@ -21,6 +21,7 @@ import type { BaseItemId, CatalogData, CategoryId, SubcategoryId } from "@/modul
 import { normalizeRu, normalizeAndTokenizeRu } from "@/lib/search/normalizeRu";
 import { buildQueryVariants } from "@/lib/search/keyboardLayout";
 import { isSimilar } from "@/lib/search/levenshtein";
+import { haversineKm } from "@/lib/geo/haversineKm";
 
 type CatalogPageClientProps = {
   catalog: CatalogData;
@@ -97,7 +98,7 @@ function getCategoryTheme(cat: { id: string; name: string }): CategoryTheme {
   return { from: "from-[#f8e6b6]", to: "to-[#f1d59c]" };
 }
 
-function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: CatalogIndexes }) {
+function CatalogUI({ catalog }: CatalogPageClientProps) {
   const pathname = usePathname();
   const { quantities, entries, totals, offerStocks, add, remove, removeLine, reload: reloadCart, lastServerMessages } =
     useCart();
@@ -128,13 +129,75 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
 
-  const [currentAddressLabel, setCurrentAddressLabel] = useState<string>("Указать адрес доставки");
+  type SelectedAddress = {
+    id: number;
+    label: string;
+    city: string;
+    latitude: number;
+    longitude: number;
+    apartment?: string | null;
+    entrance?: string | null;
+    floor?: string | null;
+    intercom?: string | null;
+    door_code_extra?: string | null;
+    comment?: string | null;
+    is_default?: boolean;
+  };
+  const SELECTED_ADDRESS_ID_KEY = "vilka_selected_address_id";
+  const SELECTED_ADDRESS_LABEL_KEY = "vilka_selected_address_label";
+  const [currentAddress, setCurrentAddress] = useState<SelectedAddress | null>(null);
+  const [currentAddressLabelFallback, setCurrentAddressLabelFallback] = useState<string>(() => {
+    if (typeof window === "undefined") return "Указать адрес доставки";
+    try {
+      const v = localStorage.getItem(SELECTED_ADDRESS_LABEL_KEY);
+      return v && v.trim() ? v : "Указать адрес доставки";
+    } catch {
+      return "Указать адрес доставки";
+    }
+  });
+  const currentAddressLabel = currentAddress?.label ?? currentAddressLabelFallback ?? "Указать адрес доставки";
   const [user, setUser] = useState<{
     id: number;
     phone: string;
     role: string;
     telegram?: { username?: string | null; firstName?: string | null; lastName?: string | null } | null;
   } | null>(null);
+
+  // Filter restaurants by distance to the selected user address.
+  // NOTE: Requirement phrasing is ambiguous ("не меньше 5,3 км").
+  // Implemented as "within 5.3 km" (<= 5.3). If you need >= 5.3, flip the comparison.
+  const MAX_RESTAURANT_DISTANCE_KM = 5.3;
+  const allowedRestaurantIds = useMemo(() => {
+    if (!currentAddress) return null;
+    const lat = currentAddress.latitude;
+    const lon = currentAddress.longitude;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    const allowed = new Set<number>();
+    for (const r of catalog.restaurants ?? []) {
+      if (r.latitude == null || r.longitude == null) continue;
+      const d = haversineKm(lat, lon, r.latitude, r.longitude);
+      if (d <= MAX_RESTAURANT_DISTANCE_KM) allowed.add(r.id);
+    }
+    return allowed;
+  }, [catalog.restaurants, currentAddress]);
+
+  const effectiveCatalog: CatalogData = useMemo(() => {
+    if (!allowedRestaurantIds) return catalog;
+
+    const offers = catalog.offers.filter((o) => allowedRestaurantIds.has(o.restaurantId));
+    const baseItemIds = new Set<string>(offers.map((o) => o.baseItemId));
+    const baseItems = catalog.baseItems.filter((b) => baseItemIds.has(b.id));
+    const subcategoryIds = new Set<string>(baseItems.map((b) => b.subcategoryId));
+    const subcategories = catalog.subcategories.filter((s) => subcategoryIds.has(s.id));
+    const categoryIds = new Set<string>(subcategories.map((s) => s.categoryId));
+    const categories = catalog.categories.filter((c) => categoryIds.has(c.id));
+    const restaurants = catalog.restaurants.filter((r) => allowedRestaurantIds.has(r.id));
+
+    return { ...catalog, offers, baseItems, subcategories, categories, restaurants };
+  }, [allowedRestaurantIds, catalog]);
+
+  const indexes = useMemo(() => buildCatalogIndexes(effectiveCatalog), [effectiveCatalog]);
 
   const [pendingAddOfferId, setPendingAddOfferId] = useState<string | null>(null);
 
@@ -150,11 +213,11 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
   const [activeItemId, setActiveItemId] = useState<BaseItemId | null>(initial.itemId);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<CategoryId[]>(initial.categoryId ? [initial.categoryId] : []);
 
-  const { categories, subcategories, baseItems } = catalog;
+  const { categories, subcategories, baseItems } = effectiveCatalog;
 
   const searchIndex = useMemo(() => {
     const idx = new Map<string, OfferTitleIndexEntry>();
-    for (const offer of catalog.offers) {
+    for (const offer of effectiveCatalog.offers) {
       const title = offer.menuItemName ?? "";
       idx.set(offer.id, {
         offer,
@@ -163,7 +226,7 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
       });
     }
     return idx;
-  }, [catalog.offers]);
+  }, [effectiveCatalog.offers]);
 
   const baseItemById = useMemo(() => new Map(baseItems.map((b) => [b.id, b])), [baseItems]);
 
@@ -586,6 +649,62 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
     loadUser();
   }, []);
 
+  // Load current address from DB (default / last selected) and persist selection.
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/addresses");
+        if (!res.ok) return;
+        const data = (await res.json().catch(() => ({}))) as { addresses?: SelectedAddress[] };
+        const list = Array.isArray(data.addresses) ? data.addresses : [];
+        if (cancelled) return;
+
+        const storedIdRaw = localStorage.getItem(SELECTED_ADDRESS_ID_KEY);
+        const storedId = storedIdRaw ? Number(storedIdRaw) : NaN;
+        const byStored = Number.isFinite(storedId) ? list.find((a) => a.id === storedId) : null;
+        const byDefault = list.find((a) => a.is_default) ?? null;
+        const next = byStored ?? byDefault ?? (list[0] ?? null);
+
+        if (next) {
+          setCurrentAddress(next);
+          localStorage.setItem(SELECTED_ADDRESS_ID_KEY, String(next.id));
+          localStorage.setItem(SELECTED_ADDRESS_LABEL_KEY, String(next.label));
+          setCurrentAddressLabelFallback(next.label);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const persistAndSetCurrentAddress = (address: SelectedAddress) => {
+    setCurrentAddress(address);
+    try {
+      localStorage.setItem(SELECTED_ADDRESS_ID_KEY, String(address.id));
+      localStorage.setItem(SELECTED_ADDRESS_LABEL_KEY, String(address.label));
+    } catch {}
+    setCurrentAddressLabelFallback(address.label);
+  };
+
+  const isSelectedAddress = (v: unknown): v is SelectedAddress => {
+    if (typeof v !== "object" || v == null || Array.isArray(v)) return false;
+    const r = v as Record<string, unknown>;
+    return (
+      typeof r.id === "number" &&
+      typeof r.label === "string" &&
+      typeof r.latitude === "number" &&
+      typeof r.longitude === "number" &&
+      typeof r.city === "string"
+    );
+  };
+
   // synced wheel scroll
   useEffect(() => {
     const pageEl = pageScrollRef.current;
@@ -630,6 +749,9 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
       window.removeEventListener("resize", apply);
     };
   }, []);
+
+  const isOutOfDeliveryZone =
+    Boolean(currentAddress) && allowedRestaurantIds != null && effectiveCatalog.offers.length === 0;
 
   return (
     <main className="flex h-[100dvh] flex-col overflow-hidden bg-[var(--vilka-bg)]">
@@ -874,7 +996,26 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
 
       <div ref={pageScrollRef} className="flex-1 overflow-y-auto bg-[var(--vilka-bg)]">
         <section className="w-full px-3 pt-3 pb-5 md:px-4 md:pt-4 md:pb-7">
-          <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[64px_minmax(0,1fr)_320px] lg:grid-cols-[200px_minmax(0,1fr)_320px] xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+          {isOutOfDeliveryZone ? (
+            <div className="mx-auto w-full max-w-[860px] rounded-3xl bg-white p-8 shadow-vilka-soft md:p-10">
+              <div className="mx-auto flex max-w-[520px] flex-col items-center text-center">
+                <div className="text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
+                  Упс, похоже нет ресторанов рядом с вами
+                </div>
+                <div className="mt-3 text-sm font-medium leading-relaxed text-slate-500">
+                  Попробуйте указать другой адрес доставки — мы покажем рестораны, которые доставляют в вашу зону.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddressOpen(true)}
+                  className="vilka-btn-primary mt-7 h-14 rounded-full px-8 text-base font-semibold"
+                >
+                  Изменить адрес
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[64px_minmax(0,1fr)_320px] lg:grid-cols-[200px_minmax(0,1fr)_320px] xl:grid-cols-[240px_minmax(0,1fr)_320px]">
             <aside
               ref={categoriesScrollRef}
               className="hidden w-full self-start rounded-3xl bg-white shadow-vilka-soft md:sticky md:top-4 md:block md:w-auto md:max-h-[calc(100dvh-var(--vilka-header-h,0px)-2rem)] md:overflow-y-auto overscroll-contain"
@@ -1314,6 +1455,7 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
               </div>
             </aside>
           </div>
+          )}
         </section>
 
         <footer className="shrink-0 border-t border-slate-200/70 bg-stone-50/80">
@@ -1339,10 +1481,14 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
 
       {/* Profile drawer (no duplicated rows) */}
       <ProfileDrawer
-  isOpen={isProfileOpen}
-  onClose={() => setIsProfileOpen(false)}
-  user={user}
-/>
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        user={user}
+        currentAddressId={currentAddress?.id ?? null}
+        onSelectAddress={(address) => {
+          if (isSelectedAddress(address)) persistAndSetCurrentAddress(address);
+        }}
+      />
 
 
       <AuthModal
@@ -1354,12 +1500,21 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
         onSuccess={async () => {
           try {
             const res = await fetch("/api/auth/me");
-            const data = await res.json().catch(() => ({}));
-            setUser((data as any).user ?? null);
+            const data = (await res.json().catch(() => ({}))) as {
+              user?:
+                | {
+                    id: number;
+                    phone: string;
+                    role: string;
+                    telegram?: { username?: string | null; firstName?: string | null; lastName?: string | null } | null;
+                  }
+                | null;
+            };
+            setUser(data.user ?? null);
 
             await reloadCart();
 
-            if ((data as any).user && pendingAddOfferId != null) {
+            if (data.user && pendingAddOfferId != null) {
               add(pendingAddOfferId);
               setPendingAddOfferId(null);
               setIsAuthOpen(false);
@@ -1373,7 +1528,9 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
       <AddressModal
         isOpen={isAddressOpen}
         onClose={() => setIsAddressOpen(false)}
-        onSelectAddress={(label: string) => setCurrentAddressLabel(label)}
+        onSelectAddress={(address) => {
+          if (isSelectedAddress(address)) persistAndSetCurrentAddress(address);
+        }}
       />
 
       <AIAssistantModal isOpen={isAssistantOpen} onClose={() => setIsAssistantOpen(false)} />
@@ -1382,18 +1539,19 @@ function CatalogUI({ catalog, indexes }: CatalogPageClientProps & { indexes: Cat
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
         baseItems={baseItems}
-        currentAddressLabel={currentAddressLabel}
-        onAddressSelected={(label: string) => setCurrentAddressLabel(label)}
+        currentAddress={currentAddress}
+        onAddressSelected={(address) => {
+          if (isSelectedAddress(address)) persistAndSetCurrentAddress(address);
+        }}
       />
     </main>
   );
 }
 
 export default function CatalogPageClient(props: CatalogPageClientProps) {
-  const indexes = useMemo(() => buildCatalogIndexes(props.catalog), [props.catalog]);
   return (
     <CartProvider offers={props.catalog.offers}>
-      <CatalogUI catalog={props.catalog} indexes={indexes} />
+      <CatalogUI catalog={props.catalog} />
     </CartProvider>
   );
 }

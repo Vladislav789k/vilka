@@ -14,8 +14,40 @@ type CheckoutModalProps = {
   isOpen: boolean;
   onClose: () => void;
   baseItems: Array<{ id: string; name: string }>;
-  currentAddressLabel: string;
-  onAddressSelected: (label: string) => void;
+  // backward-compatible: we support either an address object or just a label.
+  currentAddress?: {
+    id: number;
+    label: string;
+    city: string;
+    latitude: number;
+    longitude: number;
+    apartment?: string | null;
+    entrance?: string | null;
+    floor?: string | null;
+    intercom?: string | null;
+    door_code_extra?: string | null;
+    comment?: string | null;
+    is_default?: boolean;
+  } | null;
+  currentAddressLabel?: string;
+  onAddressSelected: (
+    address:
+      | string
+      | {
+          id: number;
+          label: string;
+          city: string;
+          latitude: number;
+          longitude: number;
+          apartment?: string | null;
+          entrance?: string | null;
+          floor?: string | null;
+          intercom?: string | null;
+          door_code_extra?: string | null;
+          comment?: string | null;
+          is_default?: boolean;
+        }
+  ) => void;
 };
 
 const ANIM_MS = 500;
@@ -150,6 +182,7 @@ export default function CheckoutModal({
   isOpen,
   onClose,
   baseItems,
+  currentAddress,
   currentAddressLabel,
   onAddressSelected,
 }: CheckoutModalProps) {
@@ -158,6 +191,12 @@ export default function CheckoutModal({
 
   const [step, setStep] = useState<CheckoutStep>("summary");
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState<number | null>(null);
+  const [deliveryEtaMinutes, setDeliveryEtaMinutes] = useState<number | null>(null);
+  const [deliveryError, setDeliveryError] = useState<string | null>(null);
+  const deliveryQuoteKeyRef = useRef<string | null>(null);
+  const [creatingDelivery, setCreatingDelivery] = useState(false);
+  const [deliveryOfferPayload, setDeliveryOfferPayload] = useState<string | null>(null);
 
   // open/close animation
   const [mounted, setMounted] = useState(false);
@@ -179,12 +218,32 @@ export default function CheckoutModal({
 
   useEffect(() => setMounted(true), []);
 
-  // Init draft address
+  // Sync draft from header-selected address (id/coords) so it survives refresh.
   useEffect(() => {
-    if (isOpen && currentAddressLabel && currentAddressLabel !== "Указать адрес доставки" && !draft.addressLabel) {
-      updateDraft({ addressLabel: currentAddressLabel });
-    }
-  }, [isOpen, currentAddressLabel, draft.addressLabel, updateDraft]);
+    if (!isOpen) return;
+    if (!currentAddress) return;
+    const needsSync =
+      draft.addressId !== currentAddress.id ||
+      draft.addressLabel !== currentAddress.label ||
+      draft.addressLatitude !== currentAddress.latitude ||
+      draft.addressLongitude !== currentAddress.longitude;
+    if (!needsSync) return;
+
+    updateDraft({
+      addressId: currentAddress.id,
+      addressLabel: currentAddress.label,
+      addressLatitude: currentAddress.latitude,
+      addressLongitude: currentAddress.longitude,
+    });
+  }, [
+    isOpen,
+    currentAddress,
+    draft.addressId,
+    draft.addressLabel,
+    draft.addressLatitude,
+    draft.addressLongitude,
+    updateDraft,
+  ]);
 
   // reset step on close
   useEffect(() => {
@@ -271,9 +330,27 @@ export default function CheckoutModal({
       }),
     []
   );
+  const pluralRu = (n: number, one: string, few: string, many: string) => {
+    const nn = Math.abs(Math.trunc(n));
+    const mod10 = nn % 10;
+    const mod100 = nn % 100;
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return few;
+    return many;
+  };
+  const formatEtaRu = (minutes: number): string => {
+    const m = Math.max(0, Math.round(minutes));
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    const parts: string[] = [];
+    if (h > 0) parts.push(`${h} ${pluralRu(h, "час", "часа", "часов")}`);
+    if (mm > 0 || parts.length === 0) parts.push(`${mm} мин`);
+    return parts.join(" ");
+  };
 
   const titleAddress =
     (draft.addressLabel && draft.addressLabel !== "Указать адрес доставки" ? draft.addressLabel : "") ||
+    (currentAddress?.label && currentAddress.label !== "Указать адрес доставки" ? currentAddress.label : "") ||
     (currentAddressLabel && currentAddressLabel !== "Указать адрес доставки" ? currentAddressLabel : "") ||
     "Указать адрес доставки";
 
@@ -292,12 +369,160 @@ export default function CheckoutModal({
 
   const selectedAddressLabel =
     (draft.addressLabel && draft.addressLabel !== "Указать адрес доставки" ? draft.addressLabel : "") ||
+    (currentAddress?.label && currentAddress.label !== "Указать адрес доставки" ? currentAddress.label : "") ||
     (currentAddressLabel && currentAddressLabel !== "Указать адрес доставки" ? currentAddressLabel : "");
 
-  const handleAddressSelected = (label: string) => {
-    updateDraft({ addressLabel: label });
-    onAddressSelected(label);
+  const handleAddressSelected = (address: {
+    id: number;
+    label: string;
+    city: string;
+    latitude: number;
+    longitude: number;
+  }) => {
+    updateDraft({
+      addressLabel: address.label,
+      addressId: address.id,
+      addressLatitude: address.latitude,
+      addressLongitude: address.longitude,
+    });
+    onAddressSelected(address);
     setIsAddressModalOpen(false);
+  };
+
+  // Delivery quote (Yandex Delivery)
+  useEffect(() => {
+    if (!draft.addressId) return;
+
+    const quoteKey = `${draft.addressId}:${entries.length}:${totals.totalPrice}`;
+    deliveryQuoteKeyRef.current = quoteKey;
+    const controller = new AbortController();
+    setDeliveryOfferPayload(null);
+
+    fetch("/api/delivery/yandex/quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ addressId: draft.addressId }),
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        const data: unknown = await res.json().catch(() => ({}));
+        const isRecord = (v: unknown): v is Record<string, unknown> =>
+          typeof v === "object" && v != null && !Array.isArray(v);
+
+        if (!res.ok) {
+          const msg =
+            isRecord(data) && typeof data.error === "string"
+              ? data.error
+              : "Не удалось рассчитать доставку";
+          throw new Error(msg);
+        }
+
+        const feeRaw = isRecord(data) ? data.priceRub : undefined;
+        const fee =
+          typeof feeRaw === "number"
+            ? feeRaw
+            : typeof feeRaw === "string"
+            ? Number(feeRaw)
+            : NaN;
+        if (!Number.isFinite(fee) || fee < 0) {
+          throw new Error("Некорректный ответ сервера по доставке");
+        }
+
+        if (deliveryQuoteKeyRef.current !== quoteKey) return;
+        setDeliveryFee(Math.round(fee));
+        setDeliveryError(null);
+
+        const payloadRaw = isRecord(data) ? data.payload : undefined;
+        const payload = typeof payloadRaw === "string" && payloadRaw.trim().length > 0 ? payloadRaw.trim() : null;
+        setDeliveryOfferPayload(payload);
+
+        const etaRaw = isRecord(data) ? data.etaMinutes : undefined;
+        const eta =
+          typeof etaRaw === "number"
+            ? etaRaw
+            : typeof etaRaw === "string"
+            ? Number(etaRaw)
+            : NaN;
+        setDeliveryEtaMinutes(Number.isFinite(eta) ? Math.max(0, Math.round(eta)) : null);
+      })
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        if (deliveryQuoteKeyRef.current !== quoteKey) return;
+        setDeliveryFee(null);
+        setDeliveryEtaMinutes(null);
+        setDeliveryOfferPayload(null);
+        setDeliveryError(e instanceof Error ? e.message : "Ошибка расчёта доставки");
+      });
+
+    return () => controller.abort();
+    // пересчитываем, когда меняется адрес или состав корзины
+  }, [draft.addressId, entries.length, totals.totalPrice]);
+
+  const effectiveDeliveryFee = draft.addressId ? deliveryFee : null;
+  const effectiveDeliveryError = draft.addressId ? deliveryError : null;
+  const effectiveDeliveryEtaMinutes = draft.addressId ? deliveryEtaMinutes : null;
+  const grandTotal = totals.totalPrice + (effectiveDeliveryFee ?? 0);
+  const payableTotal =
+    selectedAddressLabel && effectiveDeliveryFee != null ? grandTotal : totals.totalPrice;
+  const deliveryEtaTextShort =
+    effectiveDeliveryEtaMinutes == null ? null : `за ${formatEtaRu(effectiveDeliveryEtaMinutes)}`;
+  const deliveryEtaTextLong = deliveryEtaTextShort ? `${deliveryEtaTextShort} заберут и доставят` : null;
+
+  const handleCreateYandexDelivery = async () => {
+    if (!draft.addressId) {
+      alert("Сначала укажите адрес доставки");
+      return;
+    }
+    if (creatingDelivery) return;
+
+    setCreatingDelivery(true);
+    try {
+      // Persist full address details to DB (apartment/floor/etc) so they don't get lost.
+      await fetch(`/api/addresses/${draft.addressId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apartment: draft.apartment?.trim() ? draft.apartment.trim() : null,
+          entrance: draft.entrance?.trim() ? draft.entrance.trim() : null,
+          floor: draft.floor?.trim() ? draft.floor.trim() : null,
+          intercom: draft.intercom?.trim() ? draft.intercom.trim() : null,
+          comment: draft.comment?.trim() ? draft.comment.trim() : null,
+        }),
+      }).catch(() => {});
+
+      const res = await fetch("/api/delivery/yandex/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          addressId: draft.addressId,
+          offerPayload: deliveryOfferPayload,
+          leaveAtDoor: Boolean(draft.leaveAtDoor),
+          entrance: draft.entrance ?? "",
+          floor: draft.floor ?? "",
+          apartment: draft.apartment ?? "",
+          intercom: draft.intercom ?? "",
+          comment: draft.comment ?? "",
+        }),
+      });
+
+      const data: unknown = await res.json().catch(() => ({}));
+      const isRecord = (v: unknown): v is Record<string, unknown> =>
+        typeof v === "object" && v != null && !Array.isArray(v);
+
+      if (!res.ok) {
+        const msg =
+          isRecord(data) && typeof data.error === "string" ? data.error : "Не удалось создать заявку на доставку";
+        throw new Error(msg);
+      }
+
+      const id = isRecord(data) && typeof data.id === "string" ? data.id : null;
+      const status = isRecord(data) && typeof data.status === "string" ? data.status : null;
+      alert(id ? `Заявка Яндекс Доставки создана: ${id}${status ? ` (${status})` : ""}` : "Заявка создана");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Ошибка при создании доставки");
+    } finally {
+      setCreatingDelivery(false);
+    }
   };
 
   // ✅ Клик по пустой области: закрыть модалку
@@ -452,9 +677,11 @@ export default function CheckoutModal({
                       >
                         <div className="flex items-center justify-between gap-4">
                           <div className="min-w-0">
-                            <div className="text-[20px] font-semibold text-slate-900">Доставка 15 минут</div>
+                            <div className="text-[20px] font-semibold text-slate-900">
+                              Доставка {deliveryEtaTextShort ?? "≈ 15 минут"}
+                            </div>
                             <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-slate-400">
-                              <span className="tabular-nums">{formatMoney.format(totals.totalPrice)} ₽</span>
+                              <span className="tabular-nums">{formatMoney.format(payableTotal)} ₽</span>
                               <span className="text-slate-300">•</span>
                               <span className="tabular-nums">{entries.length} поз.</span>
                             </div>
@@ -660,10 +887,18 @@ export default function CheckoutModal({
                       </div>
 
                       <div className="mt-auto pt-8">
+                        {selectedAddressLabel ? (
+                          <div className="mb-2 flex items-center justify-between text-sm font-semibold text-slate-500">
+                            <span>Доставка{deliveryEtaTextShort ? ` (${deliveryEtaTextShort})` : ""}</span>
+                            <span className="tabular-nums">
+                              {effectiveDeliveryFee == null ? "—" : `${formatMoney.format(effectiveDeliveryFee)} ₽`}
+                            </span>
+                          </div>
+                        ) : null}
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-semibold text-slate-500">Итого</div>
                           <div className="text-lg font-semibold text-slate-900 tabular-nums">
-                            {formatMoney.format(totals.totalPrice)} ₽
+                            {formatMoney.format(grandTotal)} ₽
                           </div>
                         </div>
 
@@ -694,7 +929,13 @@ export default function CheckoutModal({
                           {selectedAddressLabel || "Указать адрес доставки"}
                         </div>
                         {selectedAddressLabel ? (
-                          <div className="mt-1 text-xs font-semibold text-slate-400">Доставка ~ 15 минут</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-400">
+                            Доставка {deliveryEtaTextLong ?? "≈ 15 минут"}
+                            {effectiveDeliveryFee != null ? ` • ${formatMoney.format(effectiveDeliveryFee)} ₽` : ""}
+                          </div>
+                        ) : null}
+                        {selectedAddressLabel && effectiveDeliveryError ? (
+                          <div className="mt-1 text-xs font-semibold text-rose-500">{effectiveDeliveryError}</div>
                         ) : null}
                       </div>
 
@@ -708,27 +949,27 @@ export default function CheckoutModal({
                       <FloatingInput
                         id="chk-apartment"
                         label="Квартира/офис"
-                        value={(draft as any).apartment ?? ""}
+                        value={draft.apartment ?? ""}
                         onChange={(v) => setDraftField("apartment", v)}
                       />
                       <FloatingInput
                         id="chk-floor"
                         label="Этаж"
-                        value={(draft as any).floor ?? ""}
+                        value={draft.floor ?? ""}
                         onChange={(v) => setDraftField("floor", v)}
                         inputMode="numeric"
                       />
                       <FloatingInput
                         id="chk-entrance"
                         label="Подъезд"
-                        value={(draft as any).entrance ?? ""}
+                        value={draft.entrance ?? ""}
                         onChange={(v) => setDraftField("entrance", v)}
                         inputMode="numeric"
                       />
                       <FloatingInput
                         id="chk-intercom"
                         label="Домофон"
-                        value={(draft as any).intercom ?? ""}
+                        value={draft.intercom ?? ""}
                         onChange={(v) => setDraftField("intercom", v)}
                       />
                     </div>
@@ -737,7 +978,7 @@ export default function CheckoutModal({
                       <FloatingTextarea
                         id="chk-comment"
                         label="Комментарий"
-                        value={(draft as any).comment ?? ""}
+                        value={draft.comment ?? ""}
                         onChange={(v) => setDraftField("comment", v)}
                       />
                     </div>
@@ -753,18 +994,18 @@ export default function CheckoutModal({
 
                       <button
                         type="button"
-                        onClick={() => setDraftField("leaveAtDoor", !(draft as any).leaveAtDoor)}
+                        onClick={() => setDraftField("leaveAtDoor", !draft.leaveAtDoor)}
                         className={[
                           "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors",
-                          (draft as any).leaveAtDoor ? "bg-slate-900" : "bg-slate-200",
+                          draft.leaveAtDoor ? "bg-slate-900" : "bg-slate-200",
                         ].join(" ")}
                         aria-label="Оставить у двери"
-                        aria-pressed={Boolean((draft as any).leaveAtDoor)}
+                        aria-pressed={Boolean(draft.leaveAtDoor)}
                       >
                         <span
                           className={[
                             "inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform",
-                            (draft as any).leaveAtDoor ? "translate-x-5" : "translate-x-1",
+                            draft.leaveAtDoor ? "translate-x-5" : "translate-x-1",
                           ].join(" ")}
                         />
                       </button>
@@ -789,15 +1030,17 @@ export default function CheckoutModal({
                       <div className="flex items-center justify-between">
                         <div className="text-sm font-semibold text-slate-500">Итого</div>
                         <div className="text-lg font-semibold text-slate-900 tabular-nums">
-                          {formatMoney.format(totals.totalPrice)} ₽
+                          {formatMoney.format(grandTotal)} ₽
                         </div>
                       </div>
 
                       <button
                         type="button"
+                        onClick={handleCreateYandexDelivery}
+                        disabled={creatingDelivery}
                         className="vilka-btn-primary mt-3 w-full rounded-full px-6 py-5 text-base font-semibold shadow-lg shadow-black/10 transition active:scale-[0.99]"
                       >
-                        Оплатить
+                        {creatingDelivery ? "Создаём доставку…" : "Оплатить"}
                       </button>
                     </div>
                   </div>

@@ -4,6 +4,28 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, ArrowUpRight, ChevronRight, X, Phone, UserRound, Mail, IdCard } from "lucide-react";
+import AddressModal from "@/components/AddressModal";
+
+type DbAddress = {
+  id: number;
+  label: string | null;
+  address_line: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  is_default: boolean;
+  apartment: string | null;
+  entrance: string | null;
+  floor: string | null;
+  intercom: string | null;
+  door_code_extra: string | null;
+  comment: string | null;
+};
+
+// Simple in-memory cache to avoid list "blinking" and extra refetches.
+// Keyed by user phone (or "guest").
+const ADDRESSES_CACHE_TTL_MS = 60_000;
+const addressesCache: Record<string, { at: number; items: DbAddress[] }> = {};
 
 type ProfileDrawerProps = {
   isOpen: boolean;
@@ -12,6 +34,21 @@ type ProfileDrawerProps = {
     phone: string;
     telegram?: { username?: string | null; firstName?: string | null; lastName?: string | null } | null;
   } | null;
+  currentAddressId?: number | null;
+  onSelectAddress?: (address: {
+    id: number;
+    label: string;
+    city: string;
+    latitude: number;
+    longitude: number;
+    apartment?: string | null;
+    entrance?: string | null;
+    floor?: string | null;
+    intercom?: string | null;
+    door_code_extra?: string | null;
+    comment?: string | null;
+    is_default?: boolean;
+  }) => void;
 };
 
 type Screen = "main" | "addresses" | "support" | "settings" | "settings_name" | "settings_email";
@@ -109,44 +146,224 @@ function SwitchRow({
    Screens (OUTSIDE)
    ========================= */
 
-function AddressesScreen() {
-  // временные данные (позже подключим к твоему реальному стору/беку)
-  const items = [
-    { id: "1", title: "Студенческая улица, 22 к3", subtitle: "Москва" },
-    { id: "2", title: "Надсоновская улица, 1", subtitle: "Пушкино · кв. 16, подъезд 1, этаж 4" },
-    { id: "3", title: "улица Студенческая, 22 к3", subtitle: "Москва · кв. 58, подъезд 6, этаж 4" },
-  ];
+function AddressesScreen({
+  currentAddressId,
+  onSelectAddress,
+  onDone,
+  cacheKey,
+}: {
+  currentAddressId: number | null;
+  onSelectAddress?: ProfileDrawerProps["onSelectAddress"];
+  onDone: () => void;
+  cacheKey: string;
+}) {
+  const [items, setItems] = useState<DbAddress[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+
+  const setItemsAndCache = (next: DbAddress[] | ((prev: DbAddress[]) => DbAddress[])) => {
+    setItems((prev) => {
+      const computed = typeof next === "function" ? (next as (p: DbAddress[]) => DbAddress[])(prev) : next;
+      addressesCache[cacheKey] = { at: Date.now(), items: computed };
+      return computed;
+    });
+  };
+
+  const refresh = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/addresses");
+      if (!res.ok) {
+        setError(res.status === 401 ? "Нужно войти в аккаунт" : "Не удалось загрузить адреса");
+        return;
+      }
+      const data = (await res.json().catch(() => ({}))) as { addresses?: DbAddress[] };
+      const nextItems = Array.isArray(data.addresses) ? data.addresses : [];
+      addressesCache[cacheKey] = { at: Date.now(), items: nextItems };
+      setItems(nextItems);
+    } catch {
+      setError("Не удалось загрузить адреса");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const cached = addressesCache[cacheKey];
+    if (cached?.items?.length) {
+      setItems(cached.items);
+      return;
+    }
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey]);
+
+  const formatSubtitle = (a: DbAddress) => {
+    const parts: string[] = [];
+    if (a.city) parts.push(a.city);
+    const details: string[] = [];
+    if (a.apartment) details.push(`кв. ${a.apartment}`);
+    if (a.entrance) details.push(`подъезд ${a.entrance}`);
+    if (a.floor) details.push(`этаж ${a.floor}`);
+    if (a.intercom) details.push(`домофон ${a.intercom}`);
+    if (details.length > 0) parts.push(details.join(", "));
+    return parts.join(" · ");
+  };
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-6 pb-6 pt-8 sm:px-7">
-        <div className="space-y-2">
-          {items.map((a) => (
+        {error ? (
+          <div className="py-8 text-center">
+            <div className="text-sm font-semibold text-slate-500">{error}</div>
             <button
-              key={a.id}
               type="button"
-              onClick={() => console.log("open address", a.id)}
-              className="flex w-full items-center justify-between rounded-2xl px-1 py-3 text-left hover:bg-slate-50"
+              onClick={refresh}
+              className="mt-4 rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-200"
             >
-              <div className="min-w-0">
-                <div className="truncate text-base font-semibold text-slate-800">{a.title}</div>
-                <div className="mt-0.5 truncate text-sm font-semibold text-slate-400">{a.subtitle}</div>
-              </div>
-              <ChevronRight className="h-6 w-6 shrink-0 text-slate-200" />
+              Повторить
             </button>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {loading && items.length === 0 ? (
+              <div className="py-8 text-center text-sm font-semibold text-slate-400">Загружаем адреса…</div>
+            ) : null}
+            {loading && items.length > 0 ? (
+              <div className="pb-2 text-xs font-semibold text-slate-400">Обновляем…</div>
+            ) : null}
+            {items.map((a) => {
+              const isActive = currentAddressId != null && a.id === currentAddressId;
+              return (
+                <div key={a.id} className="flex items-center gap-2 rounded-2xl px-1 py-2 hover:bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Optimistic default switch (avoid blinking), rollback on error
+                      const prevItems = items;
+                      setItemsAndCache((prev) =>
+                        prev.map((x) => (x.id === a.id ? { ...x, is_default: true } : { ...x, is_default: false }))
+                      );
+
+                      const res = await fetch(`/api/addresses/${a.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ set_default: true }),
+                      }).catch(() => null);
+
+                      if (!res || !res.ok) {
+                        // rollback
+                        setItemsAndCache(prevItems);
+                        const data = await res?.json?.().catch(() => ({} as any));
+                        const msg = data && typeof (data as any).error === "string" ? (data as any).error : "Не удалось выбрать адрес";
+                        alert(msg);
+                        return;
+                      }
+
+                      if (onSelectAddress && a.latitude != null && a.longitude != null) {
+                        onSelectAddress({
+                          id: a.id,
+                          label: a.address_line,
+                          city: a.city ?? "",
+                          latitude: a.latitude,
+                          longitude: a.longitude,
+                          apartment: a.apartment,
+                          entrance: a.entrance,
+                          floor: a.floor,
+                          intercom: a.intercom,
+                          door_code_extra: a.door_code_extra,
+                          comment: a.comment,
+                          is_default: true,
+                        });
+                        onDone();
+                      }
+                    }}
+                    className="flex min-w-0 flex-1 items-center justify-between rounded-2xl px-1 py-3 text-left"
+                    title={a.is_default ? "Адрес по умолчанию" : "Сделать адресом по умолчанию"}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-semibold text-slate-800">
+                        {a.address_line}
+                        {a.is_default ? <span className="ml-2 text-xs font-bold text-emerald-600">по умолчанию</span> : null}
+                      </div>
+                      <div className="mt-0.5 truncate text-sm font-semibold text-slate-400">{formatSubtitle(a)}</div>
+                    </div>
+                    <div className="ml-3 flex items-center gap-2">
+                      {isActive ? <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> : null}
+                      <ChevronRight className="h-6 w-6 shrink-0 text-slate-200" />
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Optimistic remove (avoid "doesn't delete"), rollback on error
+                      const prevItems = items;
+                      setItemsAndCache((prev) => prev.filter((x) => x.id !== a.id));
+
+                      const res = await fetch(`/api/addresses/${a.id}`, { method: "DELETE" }).catch(() => null);
+                      if (!res || !res.ok) {
+                        setItemsAndCache(prevItems);
+                        const data = await res?.json?.().catch(() => ({} as any));
+                        const msg =
+                          data && typeof (data as any).error === "string"
+                            ? (data as any).error
+                            : "Не удалось удалить адрес";
+                        alert(msg);
+                      }
+                    }}
+                    className="rounded-full bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+                  >
+                    Удалить
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="shrink-0 px-6 pb-7 sm:px-7">
         <button
           type="button"
-          onClick={() => console.log("new address")}
+          onClick={() => setIsAddressModalOpen(true)}
           className="vilka-btn-primary h-14 w-full rounded-full px-6 text-base font-semibold"
         >
           Новый адрес
         </button>
       </div>
+
+      <AddressModal
+        isOpen={isAddressModalOpen}
+        onClose={() => setIsAddressModalOpen(false)}
+        onSelectAddress={(address) => {
+          setIsAddressModalOpen(false);
+          // Update list locally (no refetch). New address is created as default.
+          setItemsAndCache((prev) => {
+            const next = prev.map((x) => ({ ...x, is_default: false }));
+            const a: DbAddress = {
+              id: address.id,
+              label: null,
+              address_line: address.label,
+              city: address.city ?? null,
+              latitude: address.latitude,
+              longitude: address.longitude,
+              is_default: true,
+              apartment: null,
+              entrance: null,
+              floor: null,
+              intercom: null,
+              door_code_extra: null,
+              comment: null,
+            };
+            return [a, ...next];
+          });
+          onSelectAddress?.(address as any);
+          onDone();
+        }}
+      />
     </div>
   );
 }
@@ -360,7 +577,7 @@ function SettingsNameScreen({
    Main component
    ========================= */
 
-export default function ProfileDrawer({ isOpen, onClose, user }: ProfileDrawerProps) {
+export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId, onSelectAddress }: ProfileDrawerProps) {
   const [mounted, setMounted] = useState(false);
 
   // держим компонент в DOM, пока проигрывается анимация закрытия
@@ -629,7 +846,15 @@ export default function ProfileDrawer({ isOpen, onClose, user }: ProfileDrawerPr
   );
 
   const Content = () => {
-    if (screen === "addresses") return <AddressesScreen />;
+    if (screen === "addresses")
+      return (
+        <AddressesScreen
+          currentAddressId={currentAddressId ?? null}
+          onSelectAddress={onSelectAddress}
+          onDone={popScreen}
+          cacheKey={user?.phone ?? "guest"}
+        />
+      );
     if (screen === "support") return <SupportScreen />;
 
     if (screen === "settings") {

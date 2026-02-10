@@ -5,6 +5,7 @@ const offers: Offer[] = [
   {
     id: "1",
     baseItemId: "b1",
+    restaurantId: 1,
     isAnonymous: false,
     brand: "Brand",
     price: 200,
@@ -18,6 +19,7 @@ const offers: Offer[] = [
   {
     id: "2",
     baseItemId: "b2",
+    restaurantId: 2,
     isAnonymous: true,
     price: 100,
     oldPrice: undefined,
