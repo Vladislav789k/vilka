@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
+import YandexMetrika from "@/components/YandexMetrika";
 
 const inter = Inter({
   subsets: ["latin", "cyrillic"],
@@ -24,6 +25,7 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className={`${inter.className} min-h-screen bg-[var(--vilka-bg)]`}>
+        <YandexMetrika />
         <div className="flex min-h-screen flex-col">
           {children}
         </div>
