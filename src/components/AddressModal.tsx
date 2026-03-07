@@ -714,8 +714,8 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
           className={[
             "h-14 w-full rounded-full px-6 text-base font-semibold transition",
             canSave
-              ? "bg-[#ff2d55] text-white hover:bg-[#ff1846] active:scale-[0.99]"
-              : "cursor-not-allowed bg-slate-200 text-slate-400",
+  ? "bg-[#16A34A] text-white hover:bg-[#15803D] active:scale-[0.99]"
+  : "cursor-not-allowed bg-slate-200 text-slate-400"
           ].join(" ")}
         >
           Да, всё верно

@@ -96,8 +96,26 @@ function SwitchRow({
   onChange: (v: boolean) => void;
   disabled?: boolean;
 }) {
-  // твои цвета: зелёный (on) + нормальный off
   const trackClass = disabled ? "bg-slate-200" : value ? "bg-emerald-500" : "bg-slate-200";
+
+  const scrollTopRef = useRef(0);
+
+  const findScrollParent = (node: HTMLElement | null): HTMLElement | null => {
+    let el = node?.parentElement ?? null;
+
+    while (el) {
+      const styles = window.getComputedStyle(el);
+      const overflowY = styles.overflowY;
+
+      if ((overflowY === "auto" || overflowY === "scroll") && el.scrollHeight > el.clientHeight) {
+        return el;
+      }
+
+      el = el.parentElement;
+    }
+
+    return null;
+  };
 
   return (
     <div className="flex items-center justify-between py-4">
@@ -105,6 +123,7 @@ function SwitchRow({
         <div className={["text-base font-semibold", disabled ? "text-slate-300" : "text-slate-800"].join(" ")}>
           {title}
         </div>
+
         {subtitle ? (
           <div
             className={[
@@ -123,10 +142,29 @@ function SwitchRow({
         aria-checked={value}
         aria-disabled={disabled ? true : undefined}
         disabled={disabled}
-        onClick={() => !disabled && onChange(!value)}
+        onPointerDown={(e) => {
+          e.preventDefault();
+
+          const scrollParent = findScrollParent(e.currentTarget);
+          scrollTopRef.current = scrollParent?.scrollTop ?? 0;
+        }}
+        onClick={(e) => {
+          e.preventDefault();
+
+          const scrollParent = findScrollParent(e.currentTarget);
+
+          if (!disabled) onChange(!value);
+
+          requestAnimationFrame(() => {
+            if (scrollParent) {
+              scrollParent.scrollTop = scrollTopRef.current;
+            }
+            e.currentTarget.blur();
+          });
+        }}
         className={[
           "relative inline-flex h-8 w-14 shrink-0 items-center rounded-full p-0 transition-colors",
-          "focus:outline-none focus:ring-4 focus:ring-emerald-200",
+          "focus:outline-none focus:ring-0",
           trackClass,
           disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
         ].join(" ")}
@@ -141,7 +179,6 @@ function SwitchRow({
     </div>
   );
 }
-
 /* =========================
    Screens (OUTSIDE)
    ========================= */
@@ -447,7 +484,7 @@ function SettingsMainScreen({
   const displayPhone = !user ? "+7 900 000 00 00" : user.phone.startsWith("tg:") ? "+7 900 000 00 00" : user.phone;
 
   return (
-    <div className="h-full overflow-y-auto px-6 pb-10 pt-6 sm:px-7">
+    <div className="h-full overflow-y-auto overscroll-contain px-6 pb-10 pt-6 sm:px-7">
       {/* Профиль */}
       <div className="text-2xl font-semibold tracking-tight text-slate-900">Профиль</div>
 
@@ -459,7 +496,7 @@ function SettingsMainScreen({
 
         <RowButton icon={<UserRound className="h-5 w-5" />} label="Добавить имя" onClick={onAddName} />
         <RowButton icon={<Mail className="h-5 w-5" />} label="Добавить почту" onClick={onAddEmail} />
-        <RowButton icon={<IdCard className="h-5 w-5" />} label="Привязать Сбер ID" onClick={onBindSberId} />
+
       </div>
 
       {/* Разрешения */}
@@ -679,13 +716,13 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
   useEffect(() => {
     if (!isOpen) return;
     lastFocusRef.current = document.activeElement as HTMLElement | null;
-    window.setTimeout(() => closeBtnRef.current?.focus(), 0);
+    window.setTimeout(() => closeBtnRef.current?.focus({ preventScroll: true }), 0);
   }, [isOpen]);
 
   useEffect(() => {
-    if (shouldRender) return;
-    lastFocusRef.current?.focus?.();
-  }, [shouldRender]);
+  if (shouldRender) return;
+  lastFocusRef.current?.focus?.({ preventScroll: true });
+}, [shouldRender]);
 
   useEffect(() => {
     return () => {
@@ -718,10 +755,10 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
     return { visible: "Профиль", a11y: "Профиль" };
   };
 
-  const TopBar = () => {
+  const renderTopBar = () => {
     const canGoBack = screenStack.length > 1;
     const t = getTitles(screen);
-
+  
     return (
       <div className="px-6 pt-6 sm:px-7 sm:pt-7">
         <div className="grid grid-cols-[1fr_auto_1fr] items-center">
@@ -777,8 +814,7 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
       </div>
     );
   };
-
-  const MainScreen = () => (
+  const renderMainScreen = () => (
     <div className="px-6 pb-10 pt-6 sm:px-7">
       <div className="text-left">
         <div className="text-2xl font-semibold tracking-tight text-slate-900">Профиль</div>
@@ -861,7 +897,7 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
     </div>
   );
 
-  const Content = () => {
+  const renderContent = () => {
     if (screen === "addresses")
       return (
         <AddressesScreen
@@ -872,8 +908,9 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
           openId={openId}
         />
       );
+  
     if (screen === "support") return <SupportScreen />;
-
+  
     if (screen === "settings") {
       return (
         <SettingsMainScreen
@@ -894,7 +931,7 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
         />
       );
     }
-
+  
     if (screen === "settings_email") {
       return (
         <SettingsEmailScreen
@@ -904,7 +941,7 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
         />
       );
     }
-
+  
     if (screen === "settings_name") {
       return (
         <SettingsNameScreen
@@ -917,12 +954,8 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
         />
       );
     }
-
-    return (
-      <div className="h-full overflow-y-auto">
-        <MainScreen />
-      </div>
-    );
+  
+    return <div className="h-full overflow-y-auto">{renderMainScreen()}</div>;
   };
 
   const contentWrapClass = "min-h-0 flex-1 overflow-hidden";
@@ -949,10 +982,10 @@ export default function ProfileDrawer({ isOpen, onClose, user, currentAddressId,
       >
         <div className="relative h-full overflow-hidden rounded-[32px] bg-white shadow-2xl">
           <div className="flex h-full flex-col">
-            <TopBar />
-            <div className={contentWrapClass}>
-              <Content />
-            </div>
+          {renderTopBar()}
+<div className={contentWrapClass}>
+  {renderContent()}
+</div>
           </div>
         </div>
       </div>

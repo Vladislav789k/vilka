@@ -257,7 +257,31 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
   }, [activeCategoryId, activeSubcategoryId, activeItemId, indexes]);
 
   const isSearching = searchQuery.trim().length >= 2;
-
+  const manualSubcategoryHeroById = useMemo(
+    () =>
+      new Map<string, string>([
+        ["asian_wok_fusion:asian.wok.noodles", "/wok-lapsha.jpg"],
+        ["brunch_tapas:brunch.tostadas", "/toasts.jpg"],
+        ["burgers_streetfood:burgers.classic", "/burgers.png"],
+        ["burgers_streetfood:burgers.street", "/street-food.png"],
+        ["bakery:bakery.breads", "/bread.png"],
+        ["hot_dishes:hot.meat", "/meat.png"],
+        ["desserts:desserts.glass", "/desserts-glass.png"],
+        ["desserts:desserts.cakes", "/cakes.png"],
+        ["drinks:drinks.coffee", "/coffee.png"],
+        ["drinks:drinks.cold", "/cold-drinks.png"],
+        ["pasta_noodles:pasta.italian", "/pasta.png"],
+        ["pasta_noodles:pasta.rice", "/rice.png"],
+        ["pizza:pizza.classic", "/pizza-classic.png"],
+        ["pizza:pizza.mini", "/pizza-mini.png"],
+        ["bowls_protein:bowls.protein.chicken", "/protein-bowl.png"],
+        ["salads_bowls:salads.bowls", "/bowls.png"],
+        ["salads_bowls:salads.classic", "/salads.png"],
+        ["desserts.modern:desserts.modern.mousse", "/mousse.png"],
+        ["soups:soups.asian", "/asian-soups.png"],
+      ]),
+    []
+  );
   const clearSearch = () => {
     if (!searchQuery.trim()) return;
     setSearchQuery("");
@@ -683,7 +707,34 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
     pageEl.addEventListener("wheel", handler, { passive: false, capture: true });
     return () => pageEl.removeEventListener("wheel", handler, true);
   }, []);
-
+  useEffect(() => {
+    console.log("=== SUBCATEGORIES ===");
+    console.table(
+      subcategories.map((sub) => ({
+        id: sub.id,
+        name: sub.name,
+        categoryId: sub.categoryId,
+      }))
+    );
+  
+    console.log("=== CATEGORIES ===");
+    console.table(
+      categories.map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+      }))
+    );
+  
+    console.log("=== BASE ITEMS ===");
+    console.table(
+      baseItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        subcategoryId: item.subcategoryId,
+        categoryId: item.categoryId,
+      }))
+    );
+  }, [categories, subcategories, baseItems]);
   // header height var
   useEffect(() => {
     const headerEl = headerRef.current;
@@ -1065,37 +1116,53 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
 
                               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {subsForCat.map((sub) => {
-                                  const hero = subcategoryHeroImageById.get(sub.id) ?? null;
+                                 const hero =
+                                 manualSubcategoryHeroById.get(sub.id) ??
+                                 (sub as any).imageUrl ??
+                                 subcategoryHeroImageById.get(sub.id) ??
+                                 null;
                                   return (
                                     <button
-                                      key={sub.id}
-                                      type="button"
-                                      onClick={() => handleSubcategoryCardClick(sub.id)}
-                                      className={[
-                                        "group relative w-full overflow-hidden rounded-[38px] text-left shadow-vilka-soft",
-                                        "h-[178px] sm:h-[196px] md:h-[208px]",
-                                        "bg-gradient-to-b",
-                                        theme.from,
-                                        theme.to,
-                                        "transition-transform duration-150 ease-out hover:-translate-y-1 active:translate-y-0",
-                                        "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2",
-                                      ].join(" ")}
-                                      aria-label={`Открыть подкатегорию: ${sub.name}`}
-                                    >
-                                      <div className="absolute inset-0 bg-gradient-to-r from-white/55 via-white/10 to-white/0" />
-                                      <div className="relative z-10 p-6 pr-24">
-                                        <div className="text-xl font-semibold leading-[1.1] tracking-tight text-slate-800 md:text-2xl">{sub.name}</div>
-                                      </div>
+  key={sub.id}
+  type="button"
+  onClick={() => handleSubcategoryCardClick(sub.id)}
+  className={[
+    "group relative w-full overflow-hidden rounded-[28px] text-left shadow-vilka-soft",
+    "h-[220px] sm:h-[240px] md:h-[260px]",
+    "bg-[#f3f4f6]",
+    "transition-transform duration-150 ease-out hover:-translate-y-1 active:translate-y-0",
+    "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2",
+  ].join(" ")}
+  aria-label={`Открыть подкатегорию: ${sub.name}`}
+>
+<div className="absolute left-5 top-5 z-20 max-w-[58%]">
+  <div className="text-[15px] font-semibold leading-[1.05] tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.35)] sm:text-[17px] md:text-[18px]">
+    {sub.name}
+  </div>
+</div>
 
-                                      {hero ? (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img src={hero} alt="" aria-hidden="true" className="absolute -right-8 bottom-0 top-0 w-[62%] object-cover object-left" />
-                                      ) : (
-                                        <div aria-hidden="true" className="absolute -right-10 -bottom-10 flex h-44 w-44 items-center justify-center rounded-[48px] bg-white/35 text-6xl blur-[0px]">
-                                          <CategoryEmoji code={cat.id} />
-                                        </div>
-                                      )}
-                                    </button>
+{hero ? (
+  <>
+    <img
+      src={hero}
+      alt=""
+      aria-hidden="true"
+      className="absolute inset-0 h-full w-full object-cover object-center"
+    />
+    <div
+      aria-hidden="true"
+      className="absolute inset-0 z-10 bg-gradient-to-b from-black/45 via-black/10 to-transparent"
+    />
+  </>
+) : (
+    <div
+      aria-hidden="true"
+      className="absolute inset-x-0 bottom-0 flex h-[72%] items-end justify-center text-7xl"
+    >
+      <CategoryEmoji code={cat.id} />
+    </div>
+  )}
+</button>
                                   );
                                 })}
                               </div>

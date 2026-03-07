@@ -866,25 +866,7 @@ export default function CheckoutModal({
                           <ChevronRight className="h-5 w-5 text-slate-400" />
                         </button>
 
-                        <div className="flex items-start justify-between gap-4 py-4">
-                          <div>
-                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                              СберСпасибо <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                            </div>
-                            <div className="mt-1 text-xs font-semibold text-slate-400">
-                              Войдите по Сбер ID, чтобы получать и списывать бонусы
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            className="flex h-10 w-10 items-center justify-center rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
-                            aria-label="Закрыть блок"
-                            title="Закрыть"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
+                        
                       </div>
 
                       <div className="mt-auto pt-8">
