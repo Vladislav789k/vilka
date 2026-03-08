@@ -582,18 +582,47 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
           >
             <div
               className={[
-                "h-9 w-9 rounded-full bg-[#16a34a] transition-all duration-200 ease-out",
+                "flex h-14 w-10 items-start justify-center transition-all duration-200 ease-out",
                 isMapDragging
-                  ? "shadow-[0_14px_28px_rgba(22,163,74,0.32)]"
-                  : "shadow-[0_7px_18px_rgba(22,163,74,0.3)]",
+                  ? "drop-shadow-[0_14px_28px_rgba(22,163,74,0.32)]"
+                  : "drop-shadow-[0_7px_18px_rgba(22,163,74,0.3)]",
               ].join(" ")}
-            />
-            <div
-              className={[
-                "-mt-0.5 w-[3px] rounded-full bg-[#15803d] transition-all duration-200 ease-out",
-                isMapDragging ? "h-12" : "h-8",
-              ].join(" ")}
-            />
+            >
+              <svg
+                viewBox="0 0 48 80"
+                className="h-full w-full overflow-visible"
+                aria-hidden="true"
+              >
+                <defs>
+                  <mask id="forkMask">
+                    <rect width="48" height="80" fill="white" />
+                    <rect x="11" y="0" width="26" height="6" fill="black" />
+                    <rect x="15.5" y="6" width="3" height="18" rx="1.5" fill="black" />
+                    <rect x="22.5" y="6" width="3" height="18" rx="1.5" fill="black" />
+                    <rect x="29.5" y="6" width="3" height="18" rx="1.5" fill="black" />
+                  </mask>
+                </defs>
+                <path
+                  d="M11 4
+                     C11 2.9 11.9 2 13 2
+                     H35
+                     C36.1 2 37 2.9 37 4
+                     V20
+                     C37 24.4 33.4 28 29 28
+                     H27
+                     V69
+                     C27 71.8 25.5 74 24 74
+                     H24
+                     C22.5 74 21 71.8 21 69
+                     V28
+                     H21
+                     C14.6 28 11 24.4 11 20
+                     V4 Z"
+                  fill="#16a34a"
+                  mask="url(#forkMask)"
+                />
+              </svg>
+            </div>
             <div
               className={[
                 "-mt-1 rounded-[999px] bg-black/20 blur-[2px] transition-all duration-200 ease-out",
