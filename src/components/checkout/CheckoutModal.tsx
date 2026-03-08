@@ -391,7 +391,13 @@ export default function CheckoutModal({
 
   // Delivery quote (Yandex Delivery)
   useEffect(() => {
-    if (!draft.addressId) return;
+    if (!draft.addressId || entries.length === 0) {
+      setDeliveryFee(null);
+      setDeliveryEtaMinutes(null);
+      setDeliveryOfferPayload(null);
+      setDeliveryError(null);
+      return;
+    }
 
     const quoteKey = `${draft.addressId}:${entries.length}:${totals.totalPrice}`;
     deliveryQuoteKeyRef.current = quoteKey;
@@ -463,6 +469,7 @@ export default function CheckoutModal({
   const effectiveDeliveryError = draft.addressId ? deliveryError : null;
   const effectiveDeliveryEtaMinutes = draft.addressId ? deliveryEtaMinutes : null;
   const grandTotal = totals.totalPrice + (effectiveDeliveryFee ?? 0);
+  const isCartEmpty = entries.length === 0;
   const payableTotal =
     selectedAddressLabel && effectiveDeliveryFee != null ? grandTotal : totals.totalPrice;
   const deliveryEtaTextShort =
@@ -470,6 +477,10 @@ export default function CheckoutModal({
   const deliveryEtaTextLong = deliveryEtaTextShort ? `${deliveryEtaTextShort} заберут и доставят` : null;
 
   const handleCreateYandexDelivery = async () => {
+    if (isCartEmpty) {
+      alert("Корзина пуста");
+      return;
+    }
     if (!draft.addressId) {
       alert("Сначала укажите адрес доставки");
       return;
@@ -537,6 +548,7 @@ export default function CheckoutModal({
   // ✅ Плавный переход summary -> addressPayment с сужением
   const goToAddressPayment = () => {
     if (step !== "summary") return;
+    if (isCartEmpty) return;
 
     setLayoutMode("narrow");
     setContentFade("out");
@@ -888,7 +900,13 @@ export default function CheckoutModal({
                         <button
                           type="button"
                           onClick={goToAddressPayment}
-                          className="vilka-btn-primary mt-5 w-full rounded-full px-6 py-5 text-base font-semibold shadow-lg shadow-black/10 transition active:scale-[0.99]"
+                          disabled={isCartEmpty}
+                          className={[
+                            "mt-5 w-full rounded-full px-6 py-5 text-base font-semibold shadow-lg shadow-black/10 transition",
+                            isCartEmpty
+                              ? "cursor-not-allowed bg-slate-200 text-slate-400 shadow-none"
+                              : "vilka-btn-primary active:scale-[0.99]",
+                          ].join(" ")}
                         >
                           <div className="leading-tight">Продолжить</div>
                           <div className="-mt-0.5 text-xs font-semibold opacity-80">К адресу и оплате</div>
@@ -1020,8 +1038,13 @@ export default function CheckoutModal({
                       <button
                         type="button"
                         onClick={handleCreateYandexDelivery}
-                        disabled={creatingDelivery}
-                        className="vilka-btn-primary mt-3 w-full rounded-full px-6 py-5 text-base font-semibold shadow-lg shadow-black/10 transition active:scale-[0.99]"
+                        disabled={creatingDelivery || isCartEmpty}
+                        className={[
+                          "mt-3 w-full rounded-full px-6 py-5 text-base font-semibold shadow-lg shadow-black/10 transition",
+                          creatingDelivery || isCartEmpty
+                            ? "cursor-not-allowed bg-slate-200 text-slate-400 shadow-none"
+                            : "vilka-btn-primary active:scale-[0.99]",
+                        ].join(" ")}
                       >
                         {creatingDelivery ? "Создаём доставку…" : "Оплатить"}
                       </button>

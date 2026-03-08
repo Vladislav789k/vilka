@@ -30,7 +30,7 @@ SELECT
   now(),
   0
 FROM cat
-JOIN (
+CROSS JOIN (
   VALUES
     ('Mistery box — мини', 'Сюрприз-набор из 2–3 позиций. Состав меняется ежедневно.', 'Сюрприз-набор из 2–3 позиций', 299.00::numeric(10,2), 25::int),
     ('Mistery box — стандарт', 'Сюрприз-набор из 4–5 позиций. Отличный вариант на компанию.', 'Сюрприз-набор из 4–5 позиций', 499.00::numeric(10,2), 25::int),
@@ -40,7 +40,7 @@ WHERE NOT EXISTS (
   SELECT 1
   FROM public.menu_items mi
   WHERE mi.restaurant_id = 3
-    AND mi.ref_category_id = (SELECT id FROM cat)
+    AND mi.ref_category_id = cat.id
     AND mi.name = v.name
 );
 

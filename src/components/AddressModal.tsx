@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import { YMaps, Map, Placemark, useYMaps } from "@iminside/react-yandex-maps";
+import { YMaps, Map, useYMaps } from "@iminside/react-yandex-maps";
 
 type AddressModalProps = {
   isOpen: boolean;
@@ -30,6 +30,7 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
 
   const [coords, setCoords] = useState<[number, number]>([55.7558, 37.6173]); // Москва по умолчанию
   const [zoom, setZoom] = useState<number>(12);
+  const [isMapDragging, setIsMapDragging] = useState(false);
 
   const cityInputRef = useRef<HTMLInputElement | null>(null);
   const streetInputRef = useRef<HTMLInputElement | null>(null);
@@ -37,6 +38,7 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
   const mapRef = useRef<any>(null);
   const geocodeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reverseGeocodeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isManualGeocodeRef = useRef(false);
 
   const geoRequestedRef = useRef(false);
@@ -60,6 +62,7 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
     setShowStreetSuggestions(false);
     setCoords([55.7558, 37.6173]);
     setZoom(12);
+    if (reverseGeocodeTimeoutRef.current) clearTimeout(reverseGeocodeTimeoutRef.current);
 
     geoRequestedRef.current = false;
 
@@ -95,6 +98,12 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
     },
     [zoom]
   );
+
+  const releaseManualGeocode = useCallback(() => {
+    setTimeout(() => {
+      isManualGeocodeRef.current = false;
+    }, 100);
+  }, []);
 
   const hasHouseNumber = (address: string): boolean => {
     if (!address.trim()) return false;
@@ -287,14 +296,12 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
           if (!isValidCoords(position)) return;
           applyCenter(position, 17);
         })
-        .catch(() => {})
-        .finally(() => {
-          setTimeout(() => {
-            isManualGeocodeRef.current = false;
-          }, 100);
-        });
+        .then(
+          () => releaseManualGeocode(),
+          () => releaseManualGeocode()
+        );
     },
-    [applyCenter, city, ymaps]
+    [applyCenter, city, releaseManualGeocode, ymaps]
   );
 
   // --------- Reverse geocode (coords -> city/street) ----------
@@ -337,14 +344,12 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
           if (foundCity) setCity(foundCity);
           if (foundStreet) setStreet(foundStreet);
         })
-        .catch(() => {})
-        .finally(() => {
-          setTimeout(() => {
-            isManualGeocodeRef.current = false;
-          }, 100);
-        });
+        .then(
+          () => releaseManualGeocode(),
+          () => releaseManualGeocode()
+        );
     },
-    [ymaps]
+    [releaseManualGeocode, ymaps]
   );
 
   // --------- Geolocation ----------
@@ -428,18 +433,33 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
     requestAndApplyGeolocation();
   }, [isOpen, requestAndApplyGeolocation]);
 
-  // --------- Click on map ----------
-  const handleMapClick = useCallback(
+  // --------- Move map under fixed center pin ----------
+  const handleMapBoundsChange = useCallback(
     (event: any) => {
-      if (!event) return;
-      const coordinates = event.get("coords") as unknown;
-      if (!isValidCoords(coordinates)) return;
+      const newCenter = event?.get?.("newCenter") as unknown;
+      const newZoom = event?.get?.("newZoom") as unknown;
+      if (!isValidCoords(newCenter)) return;
 
-      applyCenter(coordinates, 17);
-      handleReverseGeocode(coordinates);
+      setCoords(newCenter);
+      if (typeof newZoom === "number" && Number.isFinite(newZoom)) {
+        setZoom(newZoom);
+      }
+
+      if (reverseGeocodeTimeoutRef.current) clearTimeout(reverseGeocodeTimeoutRef.current);
+      reverseGeocodeTimeoutRef.current = setTimeout(() => {
+        handleReverseGeocode(newCenter);
+      }, 350);
     },
-    [applyCenter, handleReverseGeocode]
+    [handleReverseGeocode]
   );
+
+  const handleMapActionBegin = useCallback(() => {
+    setIsMapDragging(true);
+  }, []);
+
+  const handleMapActionEnd = useCallback(() => {
+    setIsMapDragging(false);
+  }, []);
 
   // --------- Auto geocode when typing street (debounced) ----------
   const handleGeocode = useCallback(() => {
@@ -553,6 +573,36 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
           </div>
         )}
 
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-full">
+          <div
+            className={[
+              "relative flex flex-col items-center transition-all duration-200 ease-out",
+              isMapDragging ? "-translate-y-2 scale-[1.02]" : "translate-y-0 scale-100",
+            ].join(" ")}
+          >
+            <div
+              className={[
+                "h-9 w-9 rounded-full bg-[#16a34a] transition-all duration-200 ease-out",
+                isMapDragging
+                  ? "shadow-[0_14px_28px_rgba(22,163,74,0.32)]"
+                  : "shadow-[0_7px_18px_rgba(22,163,74,0.3)]",
+              ].join(" ")}
+            />
+            <div
+              className={[
+                "-mt-0.5 w-[3px] rounded-full bg-[#15803d] transition-all duration-200 ease-out",
+                isMapDragging ? "h-12" : "h-8",
+              ].join(" ")}
+            />
+            <div
+              className={[
+                "-mt-1 rounded-[999px] bg-black/20 blur-[2px] transition-all duration-200 ease-out",
+                isMapDragging ? "h-2.5 w-6" : "h-3 w-4.5",
+              ].join(" ")}
+            />
+          </div>
+        </div>
+
         <Map
           instanceRef={(ref: any) => {
             mapRef.current = ref;
@@ -561,9 +611,10 @@ function AddressModalContent({ isOpen, onClose, onSelectAddress }: AddressModalP
           state={{ center: coords, zoom }}
           width="100%"
           height="100%"
-          onClick={handleMapClick}
+          onActionBegin={handleMapActionBegin}
+          onActionEnd={handleMapActionEnd}
+          onBoundsChange={handleMapBoundsChange}
         >
-          <Placemark geometry={coords} />
         </Map>
       </div>
 
