@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveCartIdentity } from "@/modules/cart/cartIdentity";
-import { getOrCreateCart } from "@/modules/cart/cartRepository";
 import { query } from "@/lib/db";
-import { calculateOffers, createClaim } from "@/lib/yandexDelivery/client";
+import { createClaim } from "@/lib/yandexDelivery/client";
+import { getDeliveryQuote, loadDeliveryQuoteContext } from "@/lib/yandexDelivery/quote";
 
 type ClaimRequest = {
   addressId: number;
@@ -38,114 +38,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
     }
 
-    const cart = await getOrCreateCart(identity);
-    if (!cart.items?.length) {
-      return NextResponse.json({ error: "Корзина пуста" }, { status: 400 });
-    }
-
-    const offerIds = cart.items.map((i) => i.offerId);
-
-    const { rows: itemRows } = await query<{
-      id: number;
-      name: string;
-      restaurant_id: number;
-      weight_grams: number | null;
-    }>(
-      `
-      SELECT id, name, restaurant_id, weight_grams
-      FROM menu_items
-      WHERE id = ANY($1::bigint[])
-      `,
-      [offerIds]
-    );
-
-    if (!itemRows.length) {
-      return NextResponse.json({ error: "Товары не найдены" }, { status: 400 });
-    }
-
-    const restaurantIds = Array.from(new Set(itemRows.map((r) => r.restaurant_id)));
-    if (restaurantIds.length !== 1) {
-      return NextResponse.json(
-        { error: "В корзине товары из разных ресторанов — доставка одним курьером невозможна" },
-        { status: 400 }
-      );
-    }
-    const restaurantId = restaurantIds[0]!;
-
-    const qtyByOfferId = new Map<number, number>(cart.items.map((i) => [i.offerId, i.quantity]));
-    let totalWeightGrams = 0;
-    for (const row of itemRows) {
-      const qty = qtyByOfferId.get(row.id) ?? 0;
-      const w = row.weight_grams ?? 300;
-      totalWeightGrams += Math.max(0, w) * Math.max(0, qty);
-    }
-    const totalWeightKg = Math.max(0.2, totalWeightGrams / 1000);
-
-    const { rows: restaurantRows } = await query<{
-      id: number;
-      name: string;
-      address_line: string | null;
-      city: string | null;
-      latitude: number | null;
-      longitude: number | null;
-      settings: unknown | null;
-      owner_phone: string | null;
-      owner_email: string | null;
-      owner_full_name: string | null;
-    }>(
-      `
-      SELECT
-        r.id,
-        r.name,
-        r.address_line,
-        r.city,
-        r.latitude,
-        r.longitude,
-        r.settings,
-        u.phone AS owner_phone,
-        u.email AS owner_email,
-        p.full_name AS owner_full_name
-      FROM restaurants r
-      LEFT JOIN users u ON u.id = r.owner_user_id
-      LEFT JOIN user_profiles p ON p.user_id = r.owner_user_id
-      WHERE r.id = $1
-      LIMIT 1
-      `,
-      [restaurantId]
-    );
-    const restaurant = restaurantRows[0];
-    if (restaurant?.latitude == null || restaurant?.longitude == null) {
-      return NextResponse.json(
-        { error: "У ресторана не заданы координаты — нельзя создать доставку" },
-        { status: 500 }
-      );
-    }
-
-    const { rows: addressRows } = await query<{
-      id: number;
-      address_line: string;
-      city: string | null;
-      latitude: number | null;
-      longitude: number | null;
-    }>(
-      `
-      SELECT id, address_line, city, latitude, longitude
-      FROM user_addresses
-      WHERE id = $1 AND user_id = $2
-      LIMIT 1
-      `,
-      [addressId, identity.userId]
-    );
-    const dest = addressRows[0];
-    if (!dest) {
-      return NextResponse.json({ error: "Адрес не найден" }, { status: 404 });
-    }
-    if (dest.latitude == null || dest.longitude == null) {
-      return NextResponse.json(
-        { error: "У адреса не заданы координаты — нельзя создать доставку" },
-        { status: 400 }
-      );
-    }
+    const quoteContext = await loadDeliveryQuoteContext(identity, addressId);
+    const { cart, restaurant, destination: dest, totalWeightKg, sourceFullname, destFullname } =
+      quoteContext;
 
     // Recipient fallback from DB
     let recipientName = body.recipient?.name?.trim() || "";
@@ -214,9 +109,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sourceFullname = [restaurant.city, restaurant.address_line].filter(Boolean).join(", ") || "Ресторан";
-    const destFullname = dest.address_line;
-
     const requestedOfferPayload =
       typeof body.offerPayload === "string" && body.offerPayload.trim().length > 0
         ? body.offerPayload.trim()
@@ -227,61 +119,7 @@ export async function POST(req: NextRequest) {
     if (requestedOfferPayload) {
       offerPayload = requestedOfferPayload;
     } else {
-      const offersRes = await calculateOffers({
-        items: [
-          {
-            quantity: 1,
-            weight: totalWeightKg,
-            pickup_point: 1,
-            dropoff_point: 2,
-          },
-        ],
-        route_points: [
-          {
-            id: 1,
-            coordinates: [restaurant.longitude, restaurant.latitude],
-            fullname: sourceFullname,
-            country: "Россия",
-            city: restaurant.city ?? undefined,
-          },
-          {
-            id: 2,
-            coordinates: [dest.longitude, dest.latitude],
-            fullname: destFullname,
-            country: "Россия",
-            city: dest.city ?? undefined,
-          },
-        ],
-        requirements: {
-          taxi_classes: ["courier"],
-          cargo_options: ["thermobag"],
-          pro_courier: false,
-          skip_door_to_door: false,
-        },
-      });
-
-      const courierOffers = (offersRes.offers ?? []).filter((o) => o.taxi_class === "courier");
-      if (!courierOffers.length) {
-        return NextResponse.json(
-          { error: "Нет доступного велокурьера с термосумкой для этого маршрута" },
-          { status: 409 }
-        );
-      }
-
-      // Prefer the cheapest courier offer (bike courier), tie-break by earliest delivery.
-      const best = courierOffers
-        .map((o) => {
-          const effectivePrice = Number(o.price?.total_price_with_vat ?? o.price?.total_price);
-          const deliveryTo = new Date(o.delivery_interval?.to).getTime();
-          return { o, effectivePrice, deliveryTo };
-        })
-        .filter((x) => Number.isFinite(x.effectivePrice) && Number.isFinite(x.deliveryTo))
-        .sort((a, b) => a.effectivePrice - b.effectivePrice || a.deliveryTo - b.deliveryTo)[0]?.o;
-      if (!best) {
-        return NextResponse.json({ error: "Не удалось выбрать оффер доставки" }, { status: 500 });
-      }
-
-      offerPayload = best.payload;
+      offerPayload = (await getDeliveryQuote(quoteContext)).payload;
     }
 
     const leaveAtDoor = Boolean(body.leaveAtDoor);
@@ -410,9 +248,22 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     console.error("[POST /api/delivery/yandex/claim] Error:", e);
+    const message = e instanceof Error ? e.message : "server_error";
+    const status =
+      /Не авторизован/.test(message)
+        ? 401
+        : /Корзина пуста|Товары не найдены|В корзине товары из разных ресторанов/.test(message)
+        ? 400
+        : /Адрес не найден/.test(message)
+        ? 404
+        : /координаты/.test(message)
+        ? 400
+        : /Нет доступного велокурьера/.test(message)
+        ? 409
+        : 500;
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "server_error" },
-      { status: 500 }
+      { error: message },
+      { status }
     );
   }
 }

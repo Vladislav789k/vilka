@@ -282,6 +282,19 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
       ]),
     []
   );
+  const getSubcategoryHero = (sub: { id: string; name: string }) => {
+    const normalized = `${sub.id} ${sub.name}`.toLowerCase();
+    if (normalized.includes("mistery-box") || normalized.includes("mystery-box") || normalized.includes("mistery box") || normalized.includes("mystery box")) {
+      return "/mystery-box-category.png";
+    }
+
+    return (
+      manualSubcategoryHeroById.get(sub.id) ??
+      (sub as any).imageUrl ??
+      subcategoryHeroImageById.get(sub.id) ??
+      null
+    );
+  };
   const clearSearch = () => {
     if (!searchQuery.trim()) return;
     setSearchQuery("");
@@ -1116,11 +1129,7 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
 
                               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {subsForCat.map((sub) => {
-                                 const hero =
-                                 manualSubcategoryHeroById.get(sub.id) ??
-                                 (sub as any).imageUrl ??
-                                 subcategoryHeroImageById.get(sub.id) ??
-                                 null;
+                                 const hero = getSubcategoryHero(sub);
                                   return (
                                     <button
   key={sub.id}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, ArrowLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -362,9 +362,8 @@ export default function CheckoutModal({
 
   const recommend = (baseItems ?? []).slice(0, 18);
 
-  // чтобы спокойно писать произвольные поля в draft (apartment/floor/entrance/...)
-  const setDraftField = (key: string, value: any) => {
-    updateDraft({ [key]: value } as any);
+  const setDraftField = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => {
+    updateDraft({ [key]: value } as Pick<typeof draft, K>);
   };
 
   const selectedAddressLabel =
@@ -389,6 +388,15 @@ export default function CheckoutModal({
     setIsAddressModalOpen(false);
   };
 
+  const deliveryQuoteCartSignature = useMemo(
+    () =>
+      entries
+        .map((entry) => `${entry.offer.id}:${entry.quantity}`)
+        .sort()
+        .join("|"),
+    [entries]
+  );
+
   // Delivery quote (Yandex Delivery)
   useEffect(() => {
     if (!draft.addressId || entries.length === 0) {
@@ -399,7 +407,7 @@ export default function CheckoutModal({
       return;
     }
 
-    const quoteKey = `${draft.addressId}:${entries.length}:${totals.totalPrice}`;
+    const quoteKey = `${draft.addressId}:${deliveryQuoteCartSignature}:${totals.totalPrice}`;
     deliveryQuoteKeyRef.current = quoteKey;
     const controller = new AbortController();
     setDeliveryOfferPayload(null);
@@ -463,7 +471,7 @@ export default function CheckoutModal({
 
     return () => controller.abort();
     // пересчитываем, когда меняется адрес или состав корзины
-  }, [draft.addressId, entries.length, totals.totalPrice]);
+  }, [draft.addressId, deliveryQuoteCartSignature, totals.totalPrice, entries.length]);
 
   const effectiveDeliveryFee = draft.addressId ? deliveryFee : null;
   const effectiveDeliveryError = draft.addressId ? deliveryError : null;
@@ -559,7 +567,7 @@ export default function CheckoutModal({
   };
 
   // ✅ Назад: расширяем и возвращаем summary
-  const goBackToSummary = () => {
+  const goBackToSummary = useCallback(() => {
     if (step !== "addressPayment") return;
 
     setLayoutMode("wide");
@@ -569,7 +577,7 @@ export default function CheckoutModal({
       setContentFade("in");
       requestAnimationFrame(() => leftScrollRef.current?.scrollTo({ top: 0 }));
     }, STEP_FADE_MS);
-  };
+  }, [step]);
 
   // ESC
   useEffect(() => {
@@ -583,7 +591,7 @@ export default function CheckoutModal({
 
     document.addEventListener("keydown", handleEsc);
     return () => document.removeEventListener("keydown", handleEsc);
-  }, [shouldRender, step, onClose]);
+  }, [goBackToSummary, onClose, shouldRender, step]);
 
   if (!mounted || !shouldRender) return null;
 
@@ -1020,7 +1028,7 @@ export default function CheckoutModal({
                           мир
                         </div>
                         <div className="text-sm font-semibold text-slate-900">
-                          {(draft as any).paymentText ?? "Оплата картой •••• 7136"}
+                          {"Оплата картой •••• 7136"}
                         </div>
                       </div>
                       <ChevronRight className="h-5 w-5 text-slate-400" />

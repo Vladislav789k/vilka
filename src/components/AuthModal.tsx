@@ -339,7 +339,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
               <>
                 {/* CENTER — строго по центру модалки */}
                 <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 sm:inset-x-7">
-                  <div className="flex w-full flex-col items-center">
+                  <div className="flex w-full min-w-0 flex-col items-center overflow-hidden">
                     <span className="text-sm text-slate-400">Телефон</span>
 
                     <input
@@ -347,7 +347,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
                       value={phone}
                       onChange={handlePhoneChange}
                       inputMode="numeric"
-                      className="mt-2 w-full border-none bg-transparent text-center text-5xl font-semibold tracking-wide text-slate-900 outline-none"
+                      className="mt-2 w-full min-w-0 max-w-full border-none bg-transparent px-1 text-center text-[clamp(1.5rem,4.2vw,2.75rem)] font-semibold tracking-tight text-slate-900 outline-none sm:px-0"
                     />
 
                     <button

@@ -74,7 +74,7 @@ services:
       dockerfile: Dockerfile
     container_name: kasashka_app
     working_dir: /usr/src/app
-    command: sh -c "chmod +x node_modules/.bin/next && node ws-server.js & npm run dev"
+    command: sh -c "npm run migrate:docker && chmod +x node_modules/.bin/next && node ws-server.js & npm run dev"
     volumes:
       - ./:/usr/src/app
       - /usr/src/app/node_modules

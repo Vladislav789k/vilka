@@ -1,4 +1,5 @@
-import { query, withTransaction } from "@/lib/db";
+import type { PoolClient } from "pg";
+import { withTransaction } from "@/lib/db";
 import { getRedis } from "@/lib/redis";
 
 export type CartIdentity = {
@@ -42,233 +43,571 @@ export type CartChange = {
   message: string;
 };
 
-const MIN_ORDER_SUM = 0; // TODO: load from restaurant-specific settings
-// Хотим, чтобы корзина реально сохранялась "между заходами".
-// Cookie cartToken живёт 30 дней → делаем TTL в Redis тоже длинным.
-const CACHE_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
-const cacheKey = (cartToken: string, userId: number | null) => 
+type ActiveCartRow = {
+  id: number | string;
+  user_id: number | string | null;
+  cart_token: string | null;
+  delivery_slot: string | null;
+  restaurant_id: number | string | null;
+};
+
+type PersistedCartItemRow = {
+  menu_item_id: number | string;
+  quantity: number | string;
+  item_name: string;
+  unit_price: number | string;
+  comment: string | null;
+  allow_replacement: boolean | null;
+  favorite: boolean | null;
+};
+
+type HydratedCartItemRow = PersistedCartItemRow & {
+  current_name: string | null;
+  current_price: number | string | null;
+  discount_percent: number | string | null;
+};
+
+type OfferRow = {
+  id: number | string;
+  name: string;
+  price: number | string;
+  discount_percent: number | string | null;
+  is_available: boolean;
+  is_active: boolean;
+  stock_qty: number | string;
+  restaurant_id: number | string | null;
+};
+
+type PersistedCartItem = {
+  offerId: number;
+  quantity: number;
+  itemName: string;
+  unitPrice: number;
+  comment: string | null;
+  allowReplacement: boolean;
+  isFavorite: boolean;
+};
+
+const MIN_ORDER_SUM = 0;
+const CACHE_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+const cacheKey = (cartToken: string, userId: number | null) =>
   userId ? `cart:user:${userId}` : `cart:${cartToken}`;
 
+function asNumber(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number(value);
+  return Number.NaN;
+}
+
+async function getRedisReady() {
+  const redis = getRedis();
+  if (!redis) return null;
+
+  if (!redis.isOpen) {
+    try {
+      await redis.connect();
+    } catch (error) {
+      if (!redis.isOpen) {
+        console.warn("[cart cache] redis unavailable", error);
+        return null;
+      }
+    }
+  }
+
+  return redis;
+}
+
 async function publishCartUpdate(opts: {
-  redis: ReturnType<typeof getRedis>;
   key: string;
   cart: CanonicalCart;
   changes?: CartChange[];
   stockByOfferId?: Record<number, number>;
 }) {
-  const { redis, key, cart, changes, stockByOfferId } = opts;
+  const redis = await getRedisReady();
   if (!redis) return;
+
   try {
-    // Keep payload small-ish; clients can always re-load if needed.
     await redis.publish(
       "cart_updates",
       JSON.stringify({
-        key,
-        cart,
-        changes: changes ?? [],
-        stockByOfferId: stockByOfferId ?? {},
+        key: opts.key,
+        cart: opts.cart,
+        changes: opts.changes ?? [],
+        stockByOfferId: opts.stockByOfferId ?? {},
         ts: Date.now(),
       })
     );
-  } catch (e) {
-    // Never fail the request because realtime channel failed.
-    console.warn("[cart realtime] publish failed", e);
+  } catch (error) {
+    console.warn("[cart realtime] publish failed", error);
   }
 }
 
-async function maybeMigrateAnonymousCartToUser(opts: {
-  redis: ReturnType<typeof getRedis>;
-  cartToken: string;
-  userId: number;
-}): Promise<CanonicalCart | null> {
-  const { redis, cartToken, userId } = opts;
+async function mirrorCartToCache(identity: CartIdentity, cart: CanonicalCart) {
+  const redis = await getRedisReady();
+  if (!redis) return;
+
+  try {
+    await redis.set(cacheKey(identity.cartToken, identity.userId), JSON.stringify(cart), {
+      EX: CACHE_TTL_SECONDS,
+    });
+
+    if (identity.userId) {
+      await redis.del(cacheKey(identity.cartToken, null)).catch(() => undefined);
+    }
+  } catch (error) {
+    console.warn("[cart cache] mirror failed", error);
+  }
+}
+
+function parseCanonicalCart(raw: string | null): CanonicalCart | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as CanonicalCart;
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function mergeCanonicalCarts(cartToken: string, carts: Array<CanonicalCart | null>): CanonicalCart | null {
+  const valid = carts.filter((cart): cart is CanonicalCart => Boolean(cart));
+  if (valid.length === 0) return null;
+
+  const merged = new Map<number, CanonicalCartLine>();
+  let deliverySlot: string | null = null;
+
+  for (const cart of valid) {
+    if (!deliverySlot && cart.deliverySlot) {
+      deliverySlot = cart.deliverySlot;
+    }
+
+    for (const item of cart.items) {
+      const existing = merged.get(item.offerId);
+      if (existing) {
+        merged.set(item.offerId, {
+          ...existing,
+          quantity: existing.quantity + item.quantity,
+          comment: existing.comment ?? item.comment ?? null,
+          allowReplacement: existing.allowReplacement && item.allowReplacement,
+          isFavorite: existing.isFavorite || item.isFavorite,
+        });
+        continue;
+      }
+
+      merged.set(item.offerId, { ...item });
+    }
+  }
+
+  const items = Array.from(merged.values());
+  let subtotal = 0;
+  let discountTotal = 0;
+
+  for (const item of items) {
+    const finalPrice = item.discountPrice ?? item.unitPrice;
+    subtotal += item.unitPrice * item.quantity;
+    discountTotal += (item.unitPrice - finalPrice) * item.quantity;
+  }
+
+  return {
+    cartToken,
+    deliverySlot,
+    items,
+    totals: {
+      subtotal,
+      discountTotal,
+      total: subtotal - discountTotal,
+    },
+  };
+}
+
+async function readLegacyCartFromCache(identity: CartIdentity): Promise<CanonicalCart | null> {
+  const redis = await getRedisReady();
   if (!redis) return null;
 
-  const anonKey = cacheKey(cartToken, null);
-  const userKey = cacheKey(cartToken, userId);
-
-  let anonRaw: string | null = null;
-  let userRaw: string | null = null;
-
   try {
-    [anonRaw, userRaw] = await Promise.all([redis.get(anonKey), redis.get(userKey)]);
-  } catch (e) {
-    console.error("[cart cache] migration read failed", e);
+    const raws = await Promise.all([
+      identity.userId ? redis.get(cacheKey(identity.cartToken, identity.userId)) : Promise.resolve(null),
+      redis.get(cacheKey(identity.cartToken, null)),
+    ]);
+
+    return mergeCanonicalCarts(
+      identity.cartToken,
+      raws.map((raw) => parseCanonicalCart(raw))
+    );
+  } catch (error) {
+    console.warn("[cart cache] legacy read failed", error);
     return null;
   }
-
-  if (!anonRaw) return null;
-
-  let anonCart: CanonicalCart | null = null;
-  try {
-    anonCart = JSON.parse(anonRaw) as CanonicalCart;
-  } catch (e) {
-    console.error("[cart cache] migration parse anon failed", e);
-    return null;
-  }
-
-  const anonHasItems = Array.isArray(anonCart.items) && anonCart.items.length > 0;
-  if (!anonHasItems) return null;
-
-  let userHasItems = false;
-  if (userRaw) {
-    try {
-      const userCart = JSON.parse(userRaw) as CanonicalCart;
-      userHasItems = Array.isArray(userCart.items) && userCart.items.length > 0;
-    } catch {
-      userHasItems = false;
-    }
-  }
-
-  // Переносим гостевую корзину только если у пользователя корзина отсутствует или пуста.
-  if (!userRaw || !userHasItems) {
-    try {
-      await redis.set(userKey, JSON.stringify({ ...anonCart, cartToken }), { EX: CACHE_TTL_SECONDS });
-      await redis.del(anonKey);
-      console.log("[cart cache] migrated anon cart to user cart", { anonKey, userKey, userId });
-      await publishCartUpdate({ redis, key: userKey, cart: { ...anonCart, cartToken } });
-      return { ...anonCart, cartToken };
-    } catch (e) {
-      console.error("[cart cache] migration write failed", e);
-      return null;
-    }
-  }
-
-  return null;
 }
 
-type OfferRow = {
-  id: number | string; // PostgreSQL bigint может вернуться как строка
-  name: string;
-  price: number | string; // numeric может вернуться как строка
-  discount_percent: number | string | null;
-  is_available: boolean;
-  is_active: boolean;
-  stock_qty: number;
-};
+async function getActiveCartByUser(client: PoolClient, userId: number): Promise<ActiveCartRow | null> {
+  const { rows } = await client.query<ActiveCartRow>(
+    `
+    SELECT id, user_id, cart_token, delivery_slot, restaurant_id
+    FROM carts
+    WHERE user_id = $1 AND status = 'active'
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+    `,
+    [userId]
+  );
 
-async function getOffersMap(offerIds: number[]): Promise<Map<number, OfferRow>> {
-  if (offerIds.length === 0) return new Map();
-  
-  console.log("[getOffersMap] Looking for offer IDs:", offerIds);
-  console.log("[getOffersMap] Offer IDs type:", typeof offerIds[0], "Array type:", Array.isArray(offerIds));
-  
-  // Проверяем запрос напрямую
-  try {
-    const { rows } = await query<OfferRow>(
+  return rows[0] ?? null;
+}
+
+async function getActiveCartByToken(client: PoolClient, cartToken: string): Promise<ActiveCartRow | null> {
+  const { rows } = await client.query<ActiveCartRow>(
+    `
+    SELECT id, user_id, cart_token, delivery_slot, restaurant_id
+    FROM carts
+    WHERE cart_token = $1 AND status = 'active'
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+    `,
+    [cartToken]
+  );
+
+  return rows[0] ?? null;
+}
+
+async function createActiveCart(
+  client: PoolClient,
+  identity: CartIdentity,
+  restaurantId: number | null,
+  deliverySlot: string | null = null
+): Promise<ActiveCartRow> {
+  const { rows } = await client.query<ActiveCartRow>(
+    `
+    INSERT INTO carts (user_id, cart_token, restaurant_id, delivery_slot, status)
+    VALUES ($1, $2, $3, $4, 'active')
+    RETURNING id, user_id, cart_token, delivery_slot, restaurant_id
+    `,
+    [identity.userId, identity.cartToken, restaurantId, deliverySlot]
+  );
+
+  return rows[0]!;
+}
+
+async function updateCartOwnership(
+  client: PoolClient,
+  cartId: number,
+  identity: CartIdentity
+): Promise<ActiveCartRow> {
+  const { rows } = await client.query<ActiveCartRow>(
+    `
+    UPDATE carts
+    SET user_id = $1,
+        cart_token = $2,
+        updated_at = now()
+    WHERE id = $3
+    RETURNING id, user_id, cart_token, delivery_slot, restaurant_id
+    `,
+    [identity.userId, identity.cartToken, cartId]
+  );
+
+  return rows[0]!;
+}
+
+async function getPersistedCartItems(
+  client: PoolClient,
+  cartId: number,
+  opts?: { forUpdate?: boolean }
+): Promise<PersistedCartItemRow[]> {
+  const suffix = opts?.forUpdate ? " FOR UPDATE" : "";
+  const { rows } = await client.query<PersistedCartItemRow>(
+    `
+    SELECT menu_item_id, quantity, item_name, unit_price, comment, allow_replacement, favorite
+    FROM cart_items
+    WHERE cart_id = $1
+    ORDER BY id ASC
+    ${suffix}
+    `,
+    [cartId]
+  );
+
+  return rows;
+}
+
+async function replaceCartItems(client: PoolClient, cartId: number, items: PersistedCartItem[]) {
+  await client.query(`DELETE FROM cart_items WHERE cart_id = $1`, [cartId]);
+
+  for (const item of items) {
+    await client.query(
       `
-      SELECT id, name, price, discount_percent, is_available, is_active, stock_qty
+      INSERT INTO cart_items (
+        cart_id,
+        menu_item_id,
+        quantity,
+        item_name,
+        unit_price,
+        options,
+        comment,
+        allow_replacement,
+        favorite
+      )
+      VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $8)
+      `,
+      [
+        cartId,
+        item.offerId,
+        item.quantity,
+        item.itemName,
+        item.unitPrice,
+        item.comment,
+        item.allowReplacement,
+        item.isFavorite,
+      ]
+    );
+  }
+}
+
+async function mergeCartRecords(
+  client: PoolClient,
+  identity: CartIdentity,
+  targetCart: ActiveCartRow,
+  sourceCart: ActiveCartRow
+): Promise<ActiveCartRow> {
+  if (Number(targetCart.id) === Number(sourceCart.id)) {
+    return updateCartOwnership(client, Number(targetCart.id), identity);
+  }
+
+  const targetItems = await getPersistedCartItems(client, Number(targetCart.id), { forUpdate: true });
+  const sourceItems = await getPersistedCartItems(client, Number(sourceCart.id), { forUpdate: true });
+
+  const merged = new Map<number, PersistedCartItem>();
+
+  for (const row of [...targetItems, ...sourceItems]) {
+    const offerId = asNumber(row.menu_item_id);
+    const quantity = asNumber(row.quantity);
+    if (!Number.isFinite(offerId) || !Number.isFinite(quantity) || quantity <= 0) continue;
+
+    const existing = merged.get(offerId);
+    const item: PersistedCartItem = {
+      offerId,
+      quantity,
+      itemName: row.item_name,
+      unitPrice: asNumber(row.unit_price),
+      comment: row.comment ?? null,
+      allowReplacement: row.allow_replacement ?? true,
+      isFavorite: row.favorite ?? false,
+    };
+
+    if (!existing) {
+      merged.set(offerId, item);
+      continue;
+    }
+
+    merged.set(offerId, {
+      offerId,
+      quantity: existing.quantity + item.quantity,
+      itemName: existing.itemName || item.itemName,
+      unitPrice: Number.isFinite(existing.unitPrice) ? existing.unitPrice : item.unitPrice,
+      comment: existing.comment ?? item.comment,
+      allowReplacement: existing.allowReplacement && item.allowReplacement,
+      isFavorite: existing.isFavorite || item.isFavorite,
+    });
+  }
+
+  await replaceCartItems(client, Number(targetCart.id), Array.from(merged.values()));
+  await client.query(
+    `
+    UPDATE carts
+    SET user_id = $1,
+        cart_token = $2,
+        delivery_slot = COALESCE(carts.delivery_slot, $3),
+        updated_at = now()
+    WHERE id = $4
+    `,
+    [identity.userId, identity.cartToken, sourceCart.delivery_slot, targetCart.id]
+  );
+  await client.query(`DELETE FROM carts WHERE id = $1`, [sourceCart.id]);
+
+  const { rows } = await client.query<ActiveCartRow>(
+    `
+    SELECT id, user_id, cart_token, delivery_slot, restaurant_id
+    FROM carts
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [targetCart.id]
+  );
+
+  return rows[0]!;
+}
+
+async function hydrateCart(client: PoolClient, cartRow: ActiveCartRow, cartToken: string): Promise<CanonicalCart> {
+  const { rows } = await client.query<HydratedCartItemRow>(
+    `
+    SELECT
+      ci.menu_item_id,
+      ci.quantity,
+      ci.item_name,
+      ci.unit_price,
+      ci.comment,
+      ci.allow_replacement,
+      ci.favorite,
+      mi.name AS current_name,
+      mi.price AS current_price,
+      mi.discount_percent
+    FROM cart_items ci
+    LEFT JOIN menu_items mi ON mi.id = ci.menu_item_id
+    WHERE ci.cart_id = $1
+    ORDER BY ci.id ASC
+    `,
+    [cartRow.id]
+  );
+
+  const items: CanonicalCartLine[] = [];
+  let subtotal = 0;
+  let discountTotal = 0;
+
+  for (const row of rows) {
+    const offerId = asNumber(row.menu_item_id);
+    const quantity = asNumber(row.quantity);
+    if (!Number.isFinite(offerId) || !Number.isFinite(quantity) || quantity <= 0) continue;
+
+    const unitPriceRaw = row.current_price ?? row.unit_price;
+    const unitPrice = asNumber(unitPriceRaw);
+    if (!Number.isFinite(unitPrice)) continue;
+
+    const discountPercent = row.discount_percent == null ? null : asNumber(row.discount_percent);
+    const discountPrice =
+      discountPercent != null && Number.isFinite(discountPercent) && discountPercent > 0
+        ? Math.round(unitPrice * (1 - discountPercent / 100))
+        : null;
+    const finalPrice = discountPrice ?? unitPrice;
+
+    subtotal += unitPrice * quantity;
+    discountTotal += (unitPrice - finalPrice) * quantity;
+
+    items.push({
+      offerId,
+      name: row.current_name ?? row.item_name,
+      quantity,
+      unitPrice,
+      discountPrice,
+      comment: row.comment ?? null,
+      allowReplacement: row.allow_replacement ?? true,
+      isFavorite: row.favorite ?? false,
+    });
+  }
+
+  return {
+    cartToken,
+    deliverySlot: cartRow.delivery_slot ?? null,
+    items,
+    totals: {
+      subtotal,
+      discountTotal,
+      total: subtotal - discountTotal,
+    },
+  };
+}
+
+async function seedCartFromLegacyCache(
+  client: PoolClient,
+  identity: CartIdentity
+): Promise<ActiveCartRow | null> {
+  const legacyCart = await readLegacyCartFromCache(identity);
+  if (!legacyCart || legacyCart.items.length === 0) {
+    return null;
+  }
+
+  const offerIds = legacyCart.items.map((item) => item.offerId);
+  let restaurantId: number | null = null;
+  if (offerIds.length > 0) {
+    const { rows } = await client.query<{ restaurant_id: number | string | null }>(
+      `
+      SELECT restaurant_id
       FROM menu_items
       WHERE id = ANY($1::int[])
+      ORDER BY id ASC
+      LIMIT 1
       `,
       [offerIds]
     );
-    
-    console.log("[getOffersMap] Query executed successfully");
-    console.log("[getOffersMap] Found", rows.length, "offers in database");
-    console.log("[getOffersMap] Found IDs:", rows.map(r => r.id));
-    console.log("[getOffersMap] Found rows:", rows.map(r => ({ id: r.id, name: r.name, is_available: r.is_available })));
-    
-    const map = new Map<number, OfferRow>();
-    for (const row of rows) {
-      // PostgreSQL bigint возвращается как строка, конвертируем в число
-      const rowId = typeof row.id === 'string' ? parseInt(row.id, 10) : row.id;
-      map.set(rowId, {
-        ...row,
-        id: rowId,
-        price: typeof row.price === 'string' ? parseFloat(row.price) : row.price,
-        discount_percent: row.discount_percent 
-          ? (typeof row.discount_percent === 'string' ? parseFloat(row.discount_percent) : row.discount_percent)
-          : null,
-      });
-      console.log(`[getOffersMap] Mapped offer ${rowId} (converted from ${row.id}): ${row.name}, available: ${row.is_available}`);
-    }
-    
-    // Проверяем, какие ID не найдены
-    const notFound = offerIds.filter(id => !map.has(id));
-    if (notFound.length > 0) {
-      console.error("[getOffersMap] Offers not found in database:", notFound);
-      console.error("[getOffersMap] Requested IDs:", offerIds);
-      console.error("[getOffersMap] Found IDs:", Array.from(map.keys()));
-      
-      // Попробуем найти без фильтра (на всякий)
-      const { rows: allRows } = await query<OfferRow>(
-        `
-        SELECT id, name, price, discount_percent, is_available, is_active, stock_qty
-        FROM menu_items
-        WHERE id = ANY($1::int[])
-        `,
-        [notFound]
-      );
-      console.error("[getOffersMap] Found without is_active filter:", allRows.map(r => ({ 
-        id: r.id, 
-        name: r.name, 
-        is_active: r.is_active, 
-        is_available: r.is_available 
-      })));
-    }
-    
-    return map;
-  } catch (e) {
-    console.error("[getOffersMap] Query error:", e);
-    throw e;
+    const rawRestaurantId = rows[0]?.restaurant_id;
+    const parsedRestaurantId = rawRestaurantId == null ? Number.NaN : asNumber(rawRestaurantId);
+    restaurantId = Number.isFinite(parsedRestaurantId) ? parsedRestaurantId : null;
   }
+
+  const cartRow = await createActiveCart(client, identity, restaurantId, legacyCart.deliverySlot ?? null);
+  const items: PersistedCartItem[] = legacyCart.items.map((item) => ({
+    offerId: item.offerId,
+    quantity: item.quantity,
+    itemName: item.name,
+    unitPrice: item.unitPrice,
+    comment: item.comment ?? null,
+    allowReplacement: item.allowReplacement,
+    isFavorite: item.isFavorite,
+  }));
+  await replaceCartItems(client, Number(cartRow.id), items);
+
+  return cartRow;
+}
+
+async function ensureActiveCartRecord(
+  client: PoolClient,
+  identity: CartIdentity,
+  opts?: { createIfMissing?: boolean; restaurantId?: number | null; deliverySlot?: string | null }
+): Promise<ActiveCartRow | null> {
+  const createIfMissing = opts?.createIfMissing ?? true;
+  const tokenCart = await getActiveCartByToken(client, identity.cartToken);
+
+  if (!identity.userId) {
+    if (tokenCart) return tokenCart;
+
+    const seededGuestCart = await seedCartFromLegacyCache(client, identity);
+    if (seededGuestCart) return seededGuestCart;
+
+    if (!createIfMissing) return null;
+    return createActiveCart(client, identity, opts?.restaurantId ?? null, opts?.deliverySlot ?? null);
+  }
+
+  const userCart = await getActiveCartByUser(client, identity.userId);
+
+  if (userCart && tokenCart && Number(userCart.id) !== Number(tokenCart.id)) {
+    return mergeCartRecords(client, identity, userCart, tokenCart);
+  }
+
+  if (userCart) {
+    return updateCartOwnership(client, Number(userCart.id), identity);
+  }
+
+  if (tokenCart) {
+    return updateCartOwnership(client, Number(tokenCart.id), identity);
+  }
+
+  const seededUserCart = await seedCartFromLegacyCache(client, identity);
+  if (seededUserCart) return seededUserCart;
+
+  if (!createIfMissing) return null;
+  return createActiveCart(client, identity, opts?.restaurantId ?? null, opts?.deliverySlot ?? null);
+}
+
+function buildStockMessage(maxAllowed: number): string {
+  return maxAllowed > 0 ? `Доступно только ${maxAllowed} шт.` : "Товар закончился";
 }
 
 export async function getOrCreateCart(identity: CartIdentity): Promise<CanonicalCart> {
-  const redis = getRedis();
-  if (!redis) {
-    throw new Error("Redis is not available");
-  }
-
-  // Убеждаемся, что Redis подключен
-  if (!redis.isOpen) {
-    await redis.connect();
-  }
-
-  // Если пользователь только что авторизовался, переносим гостевую корзину в пользовательскую
-  if (identity.userId) {
-    const migrated = await maybeMigrateAnonymousCartToUser({
-      redis,
-      cartToken: identity.cartToken,
-      userId: identity.userId,
-    });
-    if (migrated) return migrated;
-  }
-
-  const key = cacheKey(identity.cartToken, identity.userId);
-  
-  try {
-    const cached = await redis.get(key);
-    if (cached) {
-      return JSON.parse(cached) as CanonicalCart;
+  const cart = await withTransaction(async (client) => {
+    const cartRow = await ensureActiveCartRecord(client, identity, { createIfMissing: false });
+    if (!cartRow) {
+      return {
+        cartToken: identity.cartToken,
+        deliverySlot: null,
+        items: [],
+        totals: { subtotal: 0, discountTotal: 0, total: 0 },
+      };
     }
-  } catch (e) {
-    console.error("[cart cache] read failed", e);
-  }
+    return hydrateCart(client, cartRow, identity.cartToken);
+  });
 
-  // Создаем пустую корзину, если её нет в Redis
-  const emptyCart: CanonicalCart = {
-    cartToken: identity.cartToken,
-    deliverySlot: null,
-    items: [],
-    totals: {
-      subtotal: 0,
-      discountTotal: 0,
-      total: 0,
-    },
-  };
-
-  // Сохраняем пустую корзину в Redis
-  try {
-    await redis.set(key, JSON.stringify(emptyCart), {
-      EX: CACHE_TTL_SECONDS,
-    });
-  } catch (e) {
-    console.error("[cart cache] failed to save empty cart", e);
-  }
-
-  return emptyCart;
+  await mirrorCartToCache(identity, cart);
+  return cart;
 }
 
 export async function validateAndPersistCart(
@@ -281,57 +620,53 @@ export async function validateAndPersistCart(
   isMinOrderReached: boolean;
   stockByOfferId: Record<number, number>;
 }> {
-  const redis = getRedis();
-  if (!redis) {
-    throw new Error("Redis is not available");
-  }
-
-  // Убеждаемся, что Redis подключен
-  if (!redis.isOpen) {
-    await redis.connect();
-  }
-
-  // Перед валидацией убедимся, что гостевая корзина (если есть) перенесена в пользовательскую
-  if (identity.userId) {
-    await maybeMigrateAnonymousCartToUser({
-      redis,
-      cartToken: identity.cartToken,
-      userId: identity.userId,
-    });
-  }
-
   const changes: CartChange[] = [];
+  const stockByOfferId: Record<number, number> = {};
 
-  // Берём текущее состояние корзины из Redis, чтобы понять "дельту" и корректно
-  // списывать/возвращать остатки в БД.
-  const prevCart = await getOrCreateCart(identity);
-  const prevQtyByOfferId = new Map<number, number>(
-    prevCart.items.map((i) => [i.offerId, i.quantity])
-  );
+  const cart = await withTransaction(async (client) => {
+    let cartRow = await ensureActiveCartRecord(client, identity, { createIfMissing: false });
+    const prevItems = cartRow
+      ? await getPersistedCartItems(client, Number(cartRow.id), { forUpdate: true })
+      : [];
+    const prevQtyByOfferId = new Map<number, number>();
 
-  const desiredQtyByOfferId = new Map<number, number>();
-  const inputMetaByOfferId = new Map<number, CartLineInput>();
-  for (const line of input.items ?? []) {
-    desiredQtyByOfferId.set(line.offerId, line.quantity);
-    inputMetaByOfferId.set(line.offerId, line);
-  }
+    for (const row of prevItems) {
+      const offerId = asNumber(row.menu_item_id);
+      const quantity = asNumber(row.quantity);
+      if (!Number.isFinite(offerId) || !Number.isFinite(quantity) || quantity <= 0) continue;
+      prevQtyByOfferId.set(offerId, quantity);
+    }
 
-  const allOfferIds = Array.from(
-    new Set<number>([
-      ...Array.from(prevQtyByOfferId.keys()),
-      ...Array.from(desiredQtyByOfferId.keys()),
-    ])
-  );
+    const desiredQtyByOfferId = new Map<number, number>();
+    const inputMetaByOfferId = new Map<number, CartLineInput>();
+    for (const line of input.items ?? []) {
+      const offerId = Number(line.offerId);
+      const quantity = Math.max(0, Number(line.quantity));
+      if (!Number.isFinite(offerId)) continue;
+      desiredQtyByOfferId.set(offerId, quantity);
+      inputMetaByOfferId.set(offerId, {
+        offerId,
+        quantity,
+        comment: line.comment,
+        allowReplacement: line.allowReplacement,
+        isFavorite: line.isFavorite,
+      });
+    }
 
-  const nextQtyByOfferId = new Map<number, number>();
-  const offersMap = new Map<number, OfferRow>();
-  let stockByOfferId: Record<number, number> = {};
+    const allOfferIds = Array.from(
+      new Set<number>([
+        ...Array.from(prevQtyByOfferId.keys()),
+        ...Array.from(desiredQtyByOfferId.keys()),
+      ])
+    );
 
-  if (allOfferIds.length > 0) {
-    await withTransaction(async (client) => {
-      const res = await client.query<OfferRow>(
+    const nextQtyByOfferId = new Map<number, number>();
+    const offersMap = new Map<number, OfferRow>();
+
+    if (allOfferIds.length > 0) {
+      const { rows } = await client.query<OfferRow>(
         `
-        SELECT id, name, price, discount_percent, is_available, is_active, stock_qty
+        SELECT id, name, price, discount_percent, is_available, is_active, stock_qty, restaurant_id
         FROM menu_items
         WHERE id = ANY($1::int[])
         FOR UPDATE
@@ -339,26 +674,10 @@ export async function validateAndPersistCart(
         [allOfferIds]
       );
 
-      for (const row of res.rows) {
-        const rowId = typeof row.id === "string" ? parseInt(row.id, 10) : row.id;
-        const rawStock = (row as any).stock_qty;
-        const stockNum =
-          typeof rawStock === "string"
-            ? parseInt(rawStock, 10)
-            : typeof rawStock === "number"
-            ? rawStock
-            : Number(rawStock);
-        offersMap.set(rowId, {
-          ...row,
-          id: rowId,
-          price: typeof row.price === "string" ? parseFloat(row.price) : row.price,
-          discount_percent: row.discount_percent
-            ? typeof row.discount_percent === "string"
-              ? parseFloat(row.discount_percent)
-              : row.discount_percent
-            : null,
-          stock_qty: Number.isFinite(stockNum) ? stockNum : 0,
-        });
+      for (const row of rows) {
+        const offerId = asNumber(row.id);
+        if (!Number.isFinite(offerId)) continue;
+        offersMap.set(offerId, row);
       }
 
       for (const offerId of allOfferIds) {
@@ -386,187 +705,166 @@ export async function validateAndPersistCart(
             });
           }
           nextQty = 0;
-        } else {
-          if (desiredQty <= 0) {
-            nextQty = 0;
-          } else {
-            // stock_qty — это текущий остаток "вне корзин" (мы его уже уменьшаем при добавлении в корзину).
-            // Поэтому максимально допустимое количество = то, что уже было в корзине + текущий остаток.
-            const maxAllowed = prevQty + Math.max(0, offer.stock_qty ?? 0);
-            if (desiredQty > maxAllowed) {
-              nextQty = maxAllowed;
+        } else if (desiredQty > 0) {
+          const stockQty = Math.max(0, asNumber(offer.stock_qty));
+          const maxAllowed = prevQty + stockQty;
+          if (desiredQty > maxAllowed) {
+            nextQty = maxAllowed;
+            changes.push({
+              type: "quantity_changed",
+              offerId,
+              message: buildStockMessage(maxAllowed),
+            });
+          }
+        }
+
+        const delta = nextQty - prevQty;
+        if (offer && delta !== 0) {
+          const stockQty = Math.max(0, asNumber(offer.stock_qty));
+
+          if (delta > 0 && stockQty < delta) {
+            const maxAllowed = prevQty + stockQty;
+            nextQty = maxAllowed;
+
+            if (!changes.some((change) => change.type === "quantity_changed" && change.offerId === offerId)) {
               changes.push({
                 type: "quantity_changed",
                 offerId,
-                message:
-                  maxAllowed > 0
-                    ? `Доступно только ${maxAllowed} шт.`
-                    : "Товар закончился",
+                message: buildStockMessage(maxAllowed),
               });
             }
           }
-        }
 
-        // Применяем остатки в БД по дельте (новое - старое)
-        const delta = nextQty - prevQty;
-        if (offer && delta !== 0) {
-          if (delta > 0) {
-            // Списываем
-            if (offer.stock_qty < delta) {
-              // Safety net: не уходим в минус даже при неожиданной рассинхронизации
-              const maxAllowed = prevQty + Math.max(0, offer.stock_qty ?? 0);
-              nextQty = maxAllowed;
-              // Важно: если мы тут уменьшили количество, обязательно сообщаем фронту.
-              const alreadyReported = changes.some(
-                (c) => c.type === "quantity_changed" && c.offerId === offerId
-              );
-              if (!alreadyReported) {
-                changes.push({
-                  type: "quantity_changed",
-                  offerId,
-                  message:
-                    maxAllowed > 0
-                      ? `Доступно только ${maxAllowed} шт.`
-                      : "Товар закончился",
-                });
-              }
-            } else {
-              await client.query(
-                `UPDATE menu_items SET stock_qty = stock_qty - $1 WHERE id = $2`,
-                [delta, offerId]
-              );
-              offer.stock_qty -= delta;
-            }
-          } else {
-            // Возвращаем
-            await client.query(
-              `UPDATE menu_items SET stock_qty = stock_qty + $1 WHERE id = $2`,
-              [-delta, offerId]
-            );
-            offer.stock_qty += -delta;
+          const safeDelta = nextQty - prevQty;
+          if (safeDelta > 0) {
+            await client.query(`UPDATE menu_items SET stock_qty = stock_qty - $1 WHERE id = $2`, [
+              safeDelta,
+              offerId,
+            ]);
+            offer.stock_qty = Math.max(0, stockQty - safeDelta);
+          } else if (safeDelta < 0) {
+            await client.query(`UPDATE menu_items SET stock_qty = stock_qty + $1 WHERE id = $2`, [
+              -safeDelta,
+              offerId,
+            ]);
+            offer.stock_qty = stockQty + -safeDelta;
           }
         }
 
-        if (nextQty > 0) nextQtyByOfferId.set(offerId, nextQty);
+        if (nextQty > 0) {
+          nextQtyByOfferId.set(offerId, nextQty);
+        }
       }
 
-      // фиксируем итоговые остатки после всех списаний/возвратов (для фронта)
-      const out: Record<number, number> = {};
-      for (const [id, offer] of offersMap.entries()) {
-        if (!offer) continue;
-        out[id] = Math.max(0, offer.stock_qty ?? 0);
+      for (const [offerId, offer] of offersMap.entries()) {
+        stockByOfferId[offerId] = Math.max(0, asNumber(offer.stock_qty));
       }
-      stockByOfferId = out;
-    });
-  }
-
-  // Собираем "отфильтрованные" строки для дальнейшей сборки корзины/тоталов
-  const filtered: CartLineInput[] = [];
-  for (const [offerId, qty] of nextQtyByOfferId.entries()) {
-    const offer = offersMap.get(offerId);
-    if (!offer) continue;
-    const meta = inputMetaByOfferId.get(offerId);
-    filtered.push({
-      offerId,
-      quantity: qty,
-      comment: meta?.comment,
-      allowReplacement: meta?.allowReplacement,
-      isFavorite: meta?.isFavorite,
-    });
-  }
-
-  // Строим корзину из отфильтрованных товаров
-  const items: CanonicalCartLine[] = [];
-  let subtotal = 0;
-  let discountTotal = 0;
-
-  for (const line of filtered) {
-    const offer = offersMap.get(line.offerId)!;
-    const unitPrice =
-      typeof offer.price === "string" ? parseFloat(offer.price) : offer.price;
-    const discountPercent =
-      offer.discount_percent == null
-        ? null
-        : typeof offer.discount_percent === "string"
-        ? parseFloat(offer.discount_percent)
-        : offer.discount_percent;
-    const discount =
-      discountPercent != null && discountPercent > 0
-        ? Math.round(unitPrice * (1 - discountPercent / 100))
-        : null;
-    const finalPrice = discount ?? unitPrice;
-    subtotal += unitPrice * line.quantity;
-    discountTotal += (unitPrice - finalPrice) * line.quantity;
-
-    items.push({
-      offerId: line.offerId,
-      name: offer.name,
-      quantity: line.quantity,
-      unitPrice,
-      discountPrice: discount,
-      comment: line.comment ?? null,
-      allowReplacement: line.allowReplacement ?? true,
-      isFavorite: line.isFavorite ?? false,
-    });
-  }
-
-  // Создаем корзину
-  const cart: CanonicalCart = {
-    cartToken: identity.cartToken,
-    deliverySlot: input.deliverySlot ?? null,
-    items,
-    totals: {
-      subtotal,
-      discountTotal,
-      total: subtotal - discountTotal,
-    },
-  };
-
-  // Сохраняем в Redis
-  const key = cacheKey(identity.cartToken, identity.userId);
-  try {
-    console.log("[cart cache] Saving to Redis, key:", key, "userId:", identity.userId);
-    console.log("[cart cache] Cart to save:", JSON.stringify(cart, null, 2));
-    console.log("[cart cache] Items count:", items.length);
-    console.log("[cart cache] Items:", items.map(i => ({ offerId: i.offerId, name: i.name, quantity: i.quantity })));
-    
-    const cartJson = JSON.stringify(cart);
-    console.log("[cart cache] Cart JSON length:", cartJson.length);
-    
-    await redis.set(key, cartJson, {
-      EX: CACHE_TTL_SECONDS,
-    });
-    
-    console.log("[cart cache] Successfully saved to Redis");
-    
-    // Проверяем, что данные действительно сохранились
-    const verify = await redis.get(key);
-    if (verify) {
-      const parsed = JSON.parse(verify) as CanonicalCart;
-      console.log("[cart cache] Verified: data exists in Redis");
-      console.log("[cart cache] Verified items count:", parsed.items.length);
-      console.log("[cart cache] Verified items:", parsed.items.map(i => ({ offerId: i.offerId, name: i.name, quantity: i.quantity })));
-      
-      if (parsed.items.length !== items.length) {
-        console.error("[cart cache] WARNING: Items count mismatch!", {
-          expected: items.length,
-          actual: parsed.items.length,
-        });
-      }
-    } else {
-      console.error("[cart cache] WARNING: Data was not saved to Redis!");
     }
-  } catch (e) {
-    console.error("[cart cache] write failed", e);
-    console.error("[cart cache] Error details:", {
-      message: e instanceof Error ? e.message : String(e),
-      stack: e instanceof Error ? e.stack : undefined,
-    });
-    throw e;
-  }
 
-  // Broadcast to other clients (tabs/devices) subscribed to this cart identity.
-  await publishCartUpdate({ redis, key, cart, changes, stockByOfferId });
+    const canonicalItems: CanonicalCartLine[] = [];
+    const persistedItems: PersistedCartItem[] = [];
+    let subtotal = 0;
+    let discountTotal = 0;
+    const restaurantIds = new Set<number>();
+
+    for (const [offerId, quantity] of nextQtyByOfferId.entries()) {
+      const offer = offersMap.get(offerId);
+      if (!offer) continue;
+
+      const unitPrice = asNumber(offer.price);
+      if (!Number.isFinite(unitPrice)) continue;
+
+      const discountPercent = offer.discount_percent == null ? null : asNumber(offer.discount_percent);
+      const discountPrice =
+        discountPercent != null && Number.isFinite(discountPercent) && discountPercent > 0
+          ? Math.round(unitPrice * (1 - discountPercent / 100))
+          : null;
+      const finalPrice = discountPrice ?? unitPrice;
+      const meta = inputMetaByOfferId.get(offerId);
+
+      subtotal += unitPrice * quantity;
+      discountTotal += (unitPrice - finalPrice) * quantity;
+
+      canonicalItems.push({
+        offerId,
+        name: offer.name,
+        quantity,
+        unitPrice,
+        discountPrice,
+        comment: meta?.comment ?? null,
+        allowReplacement: meta?.allowReplacement ?? true,
+        isFavorite: meta?.isFavorite ?? false,
+      });
+
+      persistedItems.push({
+        offerId,
+        quantity,
+        itemName: offer.name,
+        unitPrice,
+        comment: meta?.comment ?? null,
+        allowReplacement: meta?.allowReplacement ?? true,
+        isFavorite: meta?.isFavorite ?? false,
+      });
+
+      const restaurantId = asNumber(offer.restaurant_id);
+      if (Number.isFinite(restaurantId)) {
+        restaurantIds.add(restaurantId);
+      }
+    }
+
+    const nextDeliverySlot = input.deliverySlot ?? cartRow?.delivery_slot ?? null;
+    const restaurantId = restaurantIds.size > 0 ? Array.from(restaurantIds)[0]! : null;
+
+    if (!cartRow && persistedItems.length === 0) {
+      return {
+        cartToken: identity.cartToken,
+        deliverySlot: nextDeliverySlot,
+        items: canonicalItems,
+        totals: {
+          subtotal,
+          discountTotal,
+          total: subtotal - discountTotal,
+        },
+      };
+    }
+
+    if (!cartRow) {
+      cartRow = await createActiveCart(client, identity, restaurantId, nextDeliverySlot);
+    }
+
+    await replaceCartItems(client, Number(cartRow.id), persistedItems);
+    await client.query(
+      `
+      UPDATE carts
+      SET user_id = $1,
+          cart_token = $2,
+          delivery_slot = $3,
+          restaurant_id = $4,
+          updated_at = now()
+      WHERE id = $5
+      `,
+      [identity.userId, identity.cartToken, nextDeliverySlot, restaurantId, cartRow.id]
+    );
+
+    return {
+      cartToken: identity.cartToken,
+      deliverySlot: nextDeliverySlot,
+      items: canonicalItems,
+      totals: {
+        subtotal,
+        discountTotal,
+        total: subtotal - discountTotal,
+      },
+    };
+  });
+
+  await mirrorCartToCache(identity, cart);
+  await publishCartUpdate({
+    key: cacheKey(identity.cartToken, identity.userId),
+    cart,
+    changes,
+    stockByOfferId,
+  });
 
   const isMinOrderReached = cart.totals.total >= MIN_ORDER_SUM;
 

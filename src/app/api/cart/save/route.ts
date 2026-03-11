@@ -1,51 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { resolveCartIdentity } from "@/modules/cart/cartIdentity";
-
-type CartPayloadRow = {
-  cart_id: number;
-  payload: any;
-};
+import { getOrCreateCart } from "@/modules/cart/cartRepository";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { cartId, name } = body as {
-      cartId?: number;
-      name?: string;
-    };
+    const { name } = body as { name?: string };
     const identity = await resolveCartIdentity();
     const userId = identity.userId;
 
-    if (!cartId || !userId || !name) {
+    if (!userId || !name?.trim()) {
       return NextResponse.json(
-        { error: "cartId, userId, name обязательны" },
+        { error: "name и userId обязательны" },
         { status: 400 }
       );
     }
 
-    // Соберём состояние корзины в payload
-    const { rows } = await query<CartPayloadRow>(
-      `
-      SELECT $1::int as cart_id,
-        (
-          SELECT jsonb_agg(
-            jsonb_build_object(
-              'cartItemId', ci.id,
-              'menuItemId', ci.menu_item_id,
-              'quantity', ci.quantity,
-              'comment', ci.comment,
-              'allowReplacement', ci.allow_replacement
-            )
-          )
-          FROM cart_items ci
-          WHERE ci.cart_id = $1
-        ) as payload
-      `,
-      [cartId]
-    );
+    const cart = await getOrCreateCart(identity);
+    if (!cart.items.length) {
+      return NextResponse.json({ error: "cart_empty" }, { status: 400 });
+    }
 
-    const payload = rows[0]?.payload ?? [];
+    const payload = cart.items.map((item) => ({
+      menuItemId: item.offerId,
+      quantity: item.quantity,
+      comment: item.comment,
+      allowReplacement: item.allowReplacement,
+    }));
 
     const insert = await query<{ id: number }>(
       `
@@ -53,7 +35,7 @@ export async function POST(req: NextRequest) {
       VALUES ($1, $2, $3)
       RETURNING id
       `,
-      [userId, name, payload]
+      [userId, name.trim(), payload]
     );
 
     return NextResponse.json({ id: insert.rows[0].id });
