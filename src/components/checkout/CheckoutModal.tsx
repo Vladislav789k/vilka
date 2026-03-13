@@ -646,7 +646,7 @@ export default function CheckoutModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="absolute right-0 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  className="absolute right-0 flex h-11 w-11 items-center justify-center text-slate-500 transition-colors hover:text-slate-800"
                   aria-label="Закрыть"
                   title="Закрыть"
                 >
@@ -664,7 +664,7 @@ export default function CheckoutModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  className="flex h-11 w-11 items-center justify-center text-slate-500 transition-colors hover:text-slate-800"
                   aria-label="Закрыть"
                   title="Закрыть"
                 >

@@ -123,6 +123,28 @@ body {
   }
 }
 
+@keyframes offerModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes offerModalOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+}
+
 /* Auth drawer — как ProfileDrawer */
 .auth-modal {
   animation: slideInFromRight 0.5s ease-out forwards;
@@ -150,6 +172,14 @@ body {
 
 .chat-modal.closing {
   animation: chatModalOut 0.18s ease-in forwards;
+}
+
+.offer-modal-panel {
+  animation: offerModalIn 0.24s ease-out forwards;
+}
+
+.offer-modal-panel.closing {
+  animation: offerModalOut 0.2s ease-in forwards;
 }
 
 /* Profile drawer — как AuthModal (slide in/out справа) */

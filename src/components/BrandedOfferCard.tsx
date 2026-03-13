@@ -10,6 +10,7 @@ type BrandedOfferCardProps = {
   imageUrl?: string | null;
   quantity?: number;
   isSoldOut?: boolean;
+  onOpen?: () => void;
   onAdd?: () => void;
   onRemove?: () => void;
   key?: string | number; // React special prop, not passed to component
@@ -25,6 +26,7 @@ const BrandedOfferCard = ({
   imageUrl,
   quantity = 0,
   isSoldOut = false,
+  onOpen,
   onAdd,
   onRemove,
 }: BrandedOfferCardProps) => {
@@ -38,6 +40,10 @@ const BrandedOfferCard = ({
   const showOldPrice = oldPrice && oldPrice > price && quantity === 0;
 
   const handleCardClick = () => {
+    if (onOpen) {
+      onOpen();
+      return;
+    }
     if (hasHandlers && quantity === 0 && !isSoldOut) {
       onAdd();
     }
@@ -46,7 +52,7 @@ const BrandedOfferCard = ({
   return (
     <article 
       onClick={handleCardClick}
-      className={`flex h-full flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition-all duration-150 hover:shadow-md ${hasHandlers && quantity === 0 ? 'cursor-pointer active:scale-[0.98]' : ''}`}
+      className={`flex h-full flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition-all duration-150 hover:shadow-md ${(onOpen || (hasHandlers && quantity === 0)) ? 'cursor-pointer active:scale-[0.98]' : ''}`}
     >
       {/* Изображение с оверлеем */}
       <div className="relative h-40 w-full bg-surface-soft">

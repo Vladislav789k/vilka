@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -127,6 +127,8 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
   const [isAddressOpen, setIsAddressOpen] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
+  const [isOfferModalClosing, setIsOfferModalClosing] = useState(false);
 
   type SelectedAddress = {
     id: number;
@@ -205,6 +207,7 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
 
   // card press animation
   const [pressedCardId, setPressedCardId] = useState<string | number | null>(null);
+  const offerModalCloseTimerRef = useRef<number | null>(null);
 
   const initial = useMemo(() => getInitialSelection(catalog), [catalog]);
   const [activeCategoryId, setActiveCategoryId] = useState<CategoryId | null>(initial.categoryId);
@@ -282,7 +285,7 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
       ]),
     []
   );
-  const getSubcategoryHero = (sub: { id: string; name: string }) => {
+  const getSubcategoryHero = (sub: { id: string; name: string; imageUrl?: string | null }) => {
     const normalized = `${sub.id} ${sub.name}`.toLowerCase();
     if (normalized.includes("mistery-box") || normalized.includes("mystery-box") || normalized.includes("mistery box") || normalized.includes("mystery box")) {
       return "/mystery-box-category.png";
@@ -290,7 +293,7 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
 
     return (
       manualSubcategoryHeroById.get(sub.id) ??
-      (sub as any).imageUrl ??
+      sub.imageUrl ??
       subcategoryHeroImageById.get(sub.id) ??
       null
     );
@@ -543,6 +546,28 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
     () => (activeItemId ? indexes.offersByBaseItem.get(activeItemId) ?? [] : []),
     [activeItemId, indexes]
   );
+  const offerById = useMemo(() => new Map(effectiveCatalog.offers.map((offer) => [offer.id, offer])), [effectiveCatalog.offers]);
+  const selectedOffer = selectedOfferId ? offerById.get(selectedOfferId) ?? null : null;
+  const selectedOfferBaseItem = selectedOffer ? baseItemById.get(selectedOffer.baseItemId) ?? null : null;
+  const relatedOffers = useMemo(() => {
+    if (!selectedOffer || !selectedOfferBaseItem) return [];
+
+    const siblingItems = indexes.itemsBySubcategory.get(selectedOfferBaseItem.subcategoryId) ?? [];
+    const collected: typeof catalog.offers = [];
+    const seen = new Set<string>();
+
+    for (const item of siblingItems) {
+      const offers = indexes.offersByBaseItem.get(item.id) ?? [];
+      for (const offer of offers) {
+        if (offer.id === selectedOffer.id || seen.has(offer.id)) continue;
+        seen.add(offer.id);
+        collected.push(offer);
+        if (collected.length >= 3) return collected;
+      }
+    }
+
+    return collected;
+  }, [catalog.offers, indexes.itemsBySubcategory, indexes.offersByBaseItem, selectedOffer, selectedOfferBaseItem]);
 
   const formatMoney = useMemo(() => new Intl.NumberFormat("ru-RU"), []);
   const cartOldTotal = useMemo(() => entries.reduce((sum, e) => sum + (e.lineOldPrice ?? e.lineTotal), 0), [entries]);
@@ -572,6 +597,56 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
       resetToOverview();
     }
   };
+
+  const openOfferModal = (offerId: string) => {
+    if (offerModalCloseTimerRef.current) {
+      window.clearTimeout(offerModalCloseTimerRef.current);
+      offerModalCloseTimerRef.current = null;
+    }
+    setIsOfferModalClosing(false);
+    setSelectedOfferId(offerId);
+  };
+
+  const closeOfferModal = useCallback(() => {
+    if (!selectedOfferId || isOfferModalClosing) return;
+    setIsOfferModalClosing(true);
+    offerModalCloseTimerRef.current = window.setTimeout(() => {
+      setSelectedOfferId(null);
+      setIsOfferModalClosing(false);
+      offerModalCloseTimerRef.current = null;
+    }, 200);
+  }, [isOfferModalClosing, selectedOfferId]);
+
+  useEffect(() => {
+    if (!selectedOfferId) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeOfferModal();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeOfferModal, selectedOfferId]);
+
+  useEffect(() => {
+    return () => {
+      if (offerModalCloseTimerRef.current) {
+        window.clearTimeout(offerModalCloseTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedOfferId) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [selectedOfferId]);
 
   const renderOffersBlock = (baseItem: (typeof baseItems)[number], offers: typeof offersForItem) => {
     return (
@@ -612,6 +687,7 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
                     imageUrl={offer.imageUrl ?? undefined}
                     quantity={quantities[offer.id] ?? 0}
                     isSoldOut={((offerStocks[offer.id] ?? offer.stock) ?? 0) <= 0}
+                    onOpen={() => openOfferModal(offer.id)}
                     onAdd={() => handleAddToCart(offer.id)}
                     onRemove={() => remove(offer.id)}
                   />
@@ -1260,6 +1336,7 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
                               imageUrl={offer.imageUrl ?? undefined}
                               quantity={quantities[offer.id] ?? 0}
                               isSoldOut={((offerStocks[offer.id] ?? offer.stock) ?? 0) <= 0}
+                              onOpen={() => openOfferModal(offer.id)}
                               onAdd={() => handleAddToCart(offer.id)}
                               onRemove={() => remove(offer.id)}
                             />
@@ -1523,6 +1600,191 @@ function CatalogUI({ catalog }: CatalogPageClientProps) {
           if (isSelectedAddress(address)) persistAndSetCurrentAddress(address);
         }}
       />
+
+      {selectedOffer && selectedOfferBaseItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6">
+          <button
+            type="button"
+            className={[
+              "absolute inset-0 bg-black/45 transition-opacity duration-200",
+              isOfferModalClosing ? "opacity-0" : "opacity-100",
+            ].join(" ")}
+            onClick={closeOfferModal}
+            aria-label="Закрыть карточку товара"
+          />
+
+          <div
+            className={[
+              "offer-modal-panel relative z-10 flex w-full max-w-6xl overflow-hidden rounded-[32px] bg-white shadow-2xl",
+              "max-h-[min(90vh,860px)] flex-col md:flex-row",
+              isOfferModalClosing ? "closing" : "",
+            ].join(" ")}
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedOffer.menuItemName}
+          >
+            <button
+              type="button"
+              onClick={closeOfferModal}
+              className="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center text-slate-500 transition-colors hover:text-slate-800"
+              aria-label="Закрыть"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="flex min-h-0 flex-col bg-slate-50 md:w-[54%]">
+              <div className="relative aspect-[1.05/1] min-h-[280px] overflow-hidden md:min-h-0">
+                {selectedOffer.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={selectedOffer.imageUrl}
+                    alt={selectedOffer.menuItemName}
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-100 text-sm font-medium text-slate-500">
+                    пока ещё нет фото!
+                  </div>
+                )}
+              </div>
+
+              {relatedOffers.length > 0 && (
+                <div className="border-t border-slate-200/80 px-5 py-5 md:px-6">
+                  <div className="mb-3 text-xl font-semibold tracking-tight text-slate-900">
+                    Что еще пригодится
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {relatedOffers.map((offer) => (
+                      <button
+                        key={offer.id}
+                        type="button"
+                        onClick={() => openOfferModal(offer.id)}
+                        className="group flex min-w-0 flex-col overflow-hidden rounded-2xl bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                      >
+                        <div className="relative aspect-square overflow-hidden bg-slate-100">
+                          {offer.imageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={offer.imageUrl}
+                              alt={offer.menuItemName}
+                              className="absolute inset-0 h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 flex items-center justify-center px-2 text-center text-[11px] font-medium text-slate-500">
+                              нет фото
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-1 flex-col px-2.5 py-2">
+                          <div className="line-clamp-2 text-xs font-semibold leading-tight text-slate-800">
+                            {offer.menuItemName}
+                          </div>
+                          <div className="mt-1 text-xs font-semibold text-emerald-600">
+                            {formatMoney.format(offer.price)} ₽
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white p-6 md:p-8">
+              <div className="min-w-0 overflow-y-auto pr-1">
+                {selectedOffer.tag && (
+                  <div className="mb-3 inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                    {selectedOffer.tag}
+                  </div>
+                )}
+                <h2 className="text-2xl font-semibold leading-tight tracking-tight text-slate-900 md:text-[2rem]">
+                  {selectedOffer.menuItemName}
+                </h2>
+
+                <div className="mt-2 text-sm font-semibold text-slate-500">
+                  {selectedOfferBaseItem.name}
+                </div>
+
+                {selectedOfferBaseItem.description && (
+                  <p className="mt-4 text-sm leading-6 text-slate-600 md:text-[15px]">
+                    {selectedOfferBaseItem.description}
+                  </p>
+                )}
+
+                {selectedOffer.brand && (
+                  <div className="mt-5 inline-flex rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">
+                    {selectedOffer.brand}
+                  </div>
+                )}
+
+                <div className="mt-6 grid gap-3 border-t border-slate-100 pt-5 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Категория</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-800">{selectedOfferBaseItem.name}</div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Наличие</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-800">
+                      {((offerStocks[selectedOffer.id] ?? selectedOffer.stock) ?? 0) > 0 ? "В наличии" : "Нет в наличии"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 border-t border-slate-100 pt-6">
+                <div className="flex items-end justify-between gap-4">
+                  <div className="flex flex-col">
+                    {selectedOffer.oldPrice && selectedOffer.oldPrice > selectedOffer.price && (
+                      <span className="text-sm font-semibold text-slate-300 line-through">
+                        {formatMoney.format(selectedOffer.oldPrice)} ₽
+                      </span>
+                    )}
+                    <span className="text-3xl font-semibold tracking-tight text-slate-900">
+                      {formatMoney.format(selectedOffer.price)} ₽
+                    </span>
+                  </div>
+
+                  {quantities[selectedOffer.id] > 0 ? (
+                    <div className="vilka-btn-primary inline-flex min-h-14 items-center gap-4 rounded-full px-4 py-2 text-base font-semibold shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => remove(selectedOffer.id)}
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-white transition hover:bg-white/15"
+                        aria-label="Уменьшить количество"
+                      >
+                        <span className="text-xl leading-none">−</span>
+                      </button>
+                      <span className="min-w-[24px] text-center tabular-nums text-white">
+                        {quantities[selectedOffer.id]}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleAddToCart(selectedOffer.id)}
+                        disabled={((offerStocks[selectedOffer.id] ?? selectedOffer.stock) ?? 0) <= 0}
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-white transition hover:bg-white/15 disabled:opacity-50"
+                        aria-label="Увеличить количество"
+                      >
+                        <span className="text-xl leading-none">+</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleAddToCart(selectedOffer.id)}
+                      disabled={((offerStocks[selectedOffer.id] ?? selectedOffer.stock) ?? 0) <= 0}
+                      className="vilka-btn-primary inline-flex min-h-14 items-center justify-center rounded-full px-7 text-base font-semibold shadow-sm transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {((offerStocks[selectedOffer.id] ?? selectedOffer.stock) ?? 0) <= 0
+                        ? "Товар закончился"
+                        : "Добавить в корзину"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -154,9 +154,28 @@ async function main() {
             ws.send(JSON.stringify({ type: "cart:error", status: res.status, error: err.slice(0, 400) }));
           } catch {}
         } else {
-          // No direct response needed; API will publish to Redis and we'll broadcast cart:update.
+          const data = await res.json().catch(() => null);
           try {
-            ws.send(JSON.stringify({ type: "cart:ack" }));
+            if (data && typeof data === "object") {
+              ws.send(
+                JSON.stringify({
+                  type: "cart:update",
+                  key,
+                  cart: {
+                    cartToken: data.cartToken,
+                    deliverySlot: data.deliverySlot ?? null,
+                    items: Array.isArray(data.items) ? data.items : [],
+                    totals: data.totals ?? null,
+                  },
+                  changes: Array.isArray(data.changes) ? data.changes : [],
+                  stockByOfferId:
+                    data.stockByOfferId && typeof data.stockByOfferId === "object" ? data.stockByOfferId : {},
+                  ts: Date.now(),
+                })
+              );
+            } else {
+              ws.send(JSON.stringify({ type: "cart:ack" }));
+            }
           } catch {}
         }
       } catch (e) {

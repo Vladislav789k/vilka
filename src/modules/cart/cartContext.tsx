@@ -39,6 +39,65 @@ export function CartProvider({ offers, children }: CartProviderProps) {
   const syncAbortRef = useRef<AbortController | null>(null);
   const lastServerMessagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const applyServerCartPayload = useRef((payload: unknown) => {
+    if (!payload || typeof payload !== "object") return;
+    const record = payload as Record<string, unknown>;
+    const items = Array.isArray(record.items)
+      ? record.items
+      : record.cart && typeof record.cart === "object" && Array.isArray((record.cart as Record<string, unknown>).items)
+      ? ((record.cart as Record<string, unknown>).items as unknown[])
+      : [];
+
+    const serverQuantities: CartState = {};
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const itemRecord = item as Record<string, unknown>;
+      const offerId = itemRecord.offerId;
+      const quantity = itemRecord.quantity;
+      if (offerId == null || quantity == null) continue;
+      const stringId = String(offerId) as OfferId;
+      const qtyNum = typeof quantity === "number" ? quantity : Number(quantity);
+      if (Number.isFinite(qtyNum) && qtyNum > 0) {
+        serverQuantities[stringId] = qtyNum;
+      }
+    }
+
+    setCart(serverQuantities);
+
+    const stockPayload =
+      record.stockByOfferId && typeof record.stockByOfferId === "object"
+        ? (record.stockByOfferId as Record<string, unknown>)
+        : null;
+    if (stockPayload) {
+      const nextStocks: Record<OfferId, number | undefined> = {};
+      for (const [k, v] of Object.entries(stockPayload)) {
+        const stringId = String(k) as OfferId;
+        const num = typeof v === "number" ? v : Number(v);
+        nextStocks[stringId] = Number.isFinite(num) ? num : undefined;
+      }
+      setOfferStocks((prev) => ({ ...prev, ...nextStocks }));
+    }
+
+    const changePayload = Array.isArray(record.changes) ? record.changes : [];
+    const messages = changePayload
+      .map((change) =>
+        change && typeof change === "object" && typeof (change as Record<string, unknown>).message === "string"
+          ? ((change as Record<string, unknown>).message as string)
+          : null
+      )
+      .filter(Boolean) as string[];
+
+    if (messages.length > 0) {
+      setLastServerMessages(messages.slice(0, 3));
+      if (lastServerMessagesTimeoutRef.current) {
+        clearTimeout(lastServerMessagesTimeoutRef.current);
+      }
+      lastServerMessagesTimeoutRef.current = setTimeout(() => {
+        setLastServerMessages([]);
+      }, 4000);
+    }
+  });
+
   const loadCartFromServer = useRef(
     async (opts?: { mergeIfHasExisting?: boolean }) => {
       const mergeIfHasExisting = opts?.mergeIfHasExisting ?? false;
@@ -100,7 +159,7 @@ export function CartProvider({ offers, children }: CartProviderProps) {
             });
           } else {
             // IMPORTANT: replace state (used after auth changes) to avoid syncing stale/empty cart over user cart
-            setCart(quantities);
+            applyServerCartPayload.current(data);
           }
         } else {
           if (transientStatuses.has(res.status)) {
@@ -156,55 +215,18 @@ export function CartProvider({ offers, children }: CartProviderProps) {
       wsRef.current = ws;
 
       ws.onmessage = (ev) => {
-        let msg: any = null;
+        let msg: unknown = null;
         try {
           msg = JSON.parse(String(ev.data));
         } catch {
           return;
         }
-        if (!msg || msg.type !== "cart:update") return;
+        if (!msg || typeof msg !== "object" || (msg as { type?: string }).type !== "cart:update") return;
         const ts = typeof msg.ts === "number" ? msg.ts : 0;
         if (ts && ts <= wsLastTsRef.current) return;
         if (ts) wsLastTsRef.current = ts;
 
-        const serverCart = msg.cart;
-        if (!serverCart || !Array.isArray(serverCart.items)) return;
-
-        const serverQuantities: CartState = {};
-        for (const item of serverCart.items) {
-          const stringId = String(item.offerId);
-          serverQuantities[stringId] = item.quantity;
-        }
-
-        // Update stocks if present
-        if (msg.stockByOfferId && typeof msg.stockByOfferId === "object") {
-          const nextStocks: Record<OfferId, number | undefined> = {};
-          for (const [k, v] of Object.entries(msg.stockByOfferId as Record<string, unknown>)) {
-            const stringId = String(k) as OfferId;
-            const num = typeof v === "number" ? v : Number(v);
-            nextStocks[stringId] = Number.isFinite(num) ? num : undefined;
-          }
-          setOfferStocks((prev) => ({ ...prev, ...nextStocks }));
-        }
-
-        // Show server messages if any
-        if (msg.changes && Array.isArray(msg.changes) && msg.changes.length > 0) {
-          const messages = (msg.changes as any[])
-            .map((c) => (c && typeof c.message === "string" ? c.message : null))
-            .filter(Boolean) as string[];
-          if (messages.length > 0) {
-            setLastServerMessages(messages.slice(0, 3));
-            if (lastServerMessagesTimeoutRef.current) {
-              clearTimeout(lastServerMessagesTimeoutRef.current);
-            }
-            lastServerMessagesTimeoutRef.current = setTimeout(() => {
-              setLastServerMessages([]);
-            }, 4000);
-          }
-        }
-
-        // Replace state with server truth (this is the point of realtime sync)
-        setCart(serverQuantities);
+        applyServerCartPayload.current(msg);
       };
 
       ws.onclose = () => {
@@ -229,7 +251,7 @@ export function CartProvider({ offers, children }: CartProviderProps) {
     // Fallback: if WS isn't connected, keep old behavior (rare; mostly during startup).
     // This is intentionally kept minimal to avoid breaking cart in environments without WS.
     try {
-      await fetch("/api/cart/validate", {
+      const res = await fetch("/api/cart/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -239,6 +261,15 @@ export function CartProvider({ offers, children }: CartProviderProps) {
             .map(([offerId, quantity]) => ({ offerId: Number(offerId), quantity })),
         }),
       });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data) {
+          applyServerCartPayload.current(data);
+        }
+      } else {
+        console.warn("[CartProvider] Cart sync fallback returned status:", res.status);
+      }
     } catch (err) {
       console.warn("[CartProvider] Cart sync fallback failed", err);
     }

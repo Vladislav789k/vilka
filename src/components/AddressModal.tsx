@@ -921,7 +921,7 @@ export default function AddressModal(props: AddressModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="absolute right-5 top-5 z-[1000] flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+              className="absolute right-5 top-5 z-[1000] flex h-10 w-10 items-center justify-center text-slate-500 transition-colors hover:text-slate-800"
               aria-label="Закрыть"
               title="Закрыть"
             >
